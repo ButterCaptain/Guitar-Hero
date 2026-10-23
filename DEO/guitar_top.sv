@@ -10,13 +10,10 @@ module guitar_top (
     output logic [15:0] score         // binary, saturates at 9999
 );
     logic [9:0] x, y;
-<<<<<<< HEAD:guitar_top.sv
     logic       visible, frame_tick;
 	// moses was here
-=======
     logic visible, frame_tick;
 
->>>>>>> 0a1b2946c7a15e29edae8e992346d86a1d639692:DEO/guitar_top.sv
     vga_sync sync (.clk50, .rst, .hsync, .vsync, .x, .y, .visible, .frame_tick);
 
     //Edge detection for Strumming
