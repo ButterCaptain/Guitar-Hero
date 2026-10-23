@@ -10,6 +10,8 @@ module guitar_top (
     output logic [15:0] score         // binary, saturates at 9999
 );
     logic [9:0] x, y;
+    logic       visible, frame_tick;
+	// moses was here
     logic visible, frame_tick;
 
     vga_sync sync (.clk50, .rst, .hsync, .vsync, .x, .y, .visible, .frame_tick);
