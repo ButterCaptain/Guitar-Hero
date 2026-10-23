@@ -1,2 +1,2 @@
 # Guitar-Hero
-Junior Design Compeition
+Junior Design Competition
