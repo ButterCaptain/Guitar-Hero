@@ -60,8 +60,13 @@ module guitar_top (
         end
     endgenerate
 
-    // ---- Score (not displayed yet) ----
-    wire [2:0] hit_cnt = 3'($countones(hit));   // several lanes can hit at once
+	logic [2:0] hit_cnt;
+
+	always_comb begin
+		 hit_cnt = 3'd0;
+		 for (int n = 0; n < NUM_LANES; n++)
+			  hit_cnt = hit_cnt + 3'(hit[n]);
+	end
 
     always_ff @(posedge clk50) begin
         if (rst)
