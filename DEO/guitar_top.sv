@@ -10,18 +10,24 @@ module guitar_top (
     output logic [15:0] score         // binary, saturates at 9999
 );
     logic [9:0] x, y;
+<<<<<<< HEAD:guitar_top.sv
     logic       visible, frame_tick;
 	// moses was here
+=======
+    logic visible, frame_tick;
+
+>>>>>>> 0a1b2946c7a15e29edae8e992346d86a1d639692:DEO/guitar_top.sv
     vga_sync sync (.clk50, .rst, .hsync, .vsync, .x, .y, .visible, .frame_tick);
 
-    // ---- Strum: two pins, one action, detected as an edge ----
+    //Edge detection for Strumming
     logic strum, strum_prev;
     assign strum = strum_up | strum_down;
 
     always_ff @(posedge clk50)
         strum_prev <= rst ? 1'b0 : strum;
 
-    wire strum_edge = strum & ~strum_prev;   // high for exactly one clock
+    logic strum_edge;
+    assign strum_edge = strum & ~strum_prev;
 
     // ---- Lanes ----
     localparam int NUM_LANES = 5;
@@ -30,16 +36,19 @@ module guitar_top (
     localparam int ZONE_Y0   = 400;
     localparam int ZONE_Y1   = 420;
 
+    // Color the lanes
     localparam logic [11:0] LANE_COLOR [NUM_LANES] =
         '{12'h0F0, 12'hF00, 12'hFF0, 12'h00F, 12'hF80};
 
     logic [NUM_LANES-1:0] note_px, zone_px, hit;
 
+    // This creates 4 physical copies of each lane logic on the FPGA
     genvar i;
     generate
         for (i = 0; i < NUM_LANES; i++) begin : lane
             localparam int LX = LANE_X0 + i * LANE_W;
-
+            
+            // Initialize Note blocks
             note_box #(
                 .X_POS  (LX + 30),
                 .BOX_W  (40),
@@ -60,9 +69,11 @@ module guitar_top (
         end
     endgenerate
 
-    // ---- Score (not displayed yet) ----
-    wire [2:0] hit_cnt = 3'($countones(hit));   // several lanes can hit at once
+    // Score
+    logic [2:0] hit_cnt;
+    assign hit_cnt = 3'($countones(hit));
 
+    // Update Score
     always_ff @(posedge clk50) begin
         if (rst)
             score <= 16'd0;
@@ -70,10 +81,11 @@ module guitar_top (
             score <= (score + hit_cnt > 9999) ? 16'd9999 : score + hit_cnt;
     end
 
-    // ---- Drawing ----
-    wire strum_px = strum &&
-                    (x >= LANE_X0) && (x < LANE_X0 + NUM_LANES * LANE_W) &&
-                    (y >= 430) && (y < 440);
+    // Draw Strum
+    logic strum_px;
+    assign strum_px = strum &&  
+                  (x >= LANE_X0) && (x < LANE_X0 + NUM_LANES * LANE_W) &&
+                  (y >= 430) && (y < 440);
 
     always_comb begin
         {r, g, b} = 12'h111;

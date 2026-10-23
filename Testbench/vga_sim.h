@@ -107,13 +107,13 @@ class VgaSim{
                 running_ = false;
         }
         const Uint8* ks = SDL_GetKeyboardState(nullptr);
-keys_ = (ks[SDL_SCANCODE_A]    ? 0x01 : 0) |   // fret 0 (green)
-        (ks[SDL_SCANCODE_S]    ? 0x02 : 0) |   // fret 1 (red)
-        (ks[SDL_SCANCODE_D]    ? 0x04 : 0) |   // fret 2 (yellow)
-        (ks[SDL_SCANCODE_F]    ? 0x08 : 0) |   // fret 3 (blue)
-        (ks[SDL_SCANCODE_G]    ? 0x10 : 0) |   // fret 4 (orange)
-        (ks[SDL_SCANCODE_UP]   ? 0x20 : 0) |   // strum up
-        (ks[SDL_SCANCODE_DOWN] ? 0x40 : 0);    // strum down
+        keys_ = (ks[SDL_SCANCODE_A]    ? 0x01 : 0) |   // fret 0 (green)
+                (ks[SDL_SCANCODE_S]    ? 0x02 : 0) |   // fret 1 (red)
+                (ks[SDL_SCANCODE_D]    ? 0x04 : 0) |   // fret 2 (yellow)
+                (ks[SDL_SCANCODE_F]    ? 0x08 : 0) |   // fret 3 (blue)
+                (ks[SDL_SCANCODE_G]    ? 0x10 : 0) |   // fret 4 (orange)
+                (ks[SDL_SCANCODE_UP]   ? 0x20 : 0) |   // strum up
+                (ks[SDL_SCANCODE_DOWN] ? 0x40 : 0);    // strum down
 
 
     }

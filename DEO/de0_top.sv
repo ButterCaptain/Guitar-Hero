@@ -6,6 +6,7 @@ module de0_top (
     output logic [3:0]  VGA_R, VGA_G, VGA_B,
     output logic [9:0]  LEDG          // temporary score debug
 );
+// moses was here
     // 2-flip-flop synchronizers, inverting to active-high
     logic [6:0] sync1, sync2;
     logic [1:0] rst_sync;
