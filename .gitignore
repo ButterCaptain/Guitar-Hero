@@ -1,0 +1,4 @@
+obj_dir/
+*.png
+*.o
+*.out
