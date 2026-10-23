@@ -45,17 +45,17 @@ NOTE: The first build takes a while. Later builds only recompile what changed.
 
 ### What each part of the command means
 
-| Part | What it does | How to fill it in 
-| `verilator`               | Runs the tool | Always the same 
-| `-Wno-WIDTH`              | Silences bit-width mismatch warnings (Verilator treats them as errors by default) | Keep it as is 
-| `--cc`                    | Generate C++ output (as opposed to SystemC) | Always the same |
-| `--exe`                   | Also build an executable, using the C++ file(s) you list | Always the same |
-| `--build`                 | Run `make` automatically after translating | Always the same |
-| `--top-module guitar_top` | Names the module that is the root of the design | Use the module name from your `.sv` file (not the file name). It must match exactly. |
-| `-CFLAGS "$(sdl2-config --cflags)"`| Tells the C++ compiler where SDL2's headers are | Keep it as is. `sdl2-config` fills in the paths for your system. |
-| `-LDFLAGS "$(sdl2-config --libs)"` | Tells the linker which SDL2 libraries to link | Keep it as is |
-| `vga_sync.sv note_box.sv guitar_top.sv` | Your SystemVerilog sources | List every `.sv` file the design needs. Order doesn't matter. |
-| `tb_main.cpp`             | Your C++ testbench | Exactly one file with `main()` |
+| Part | What it does | How to fill it in \
+| `verilator`               | Runs the tool | Always the same \
+| `-Wno-WIDTH`              | Silences bit-width mismatch warnings (Verilator treats them as errors by default) | Keep it as is \
+| `--cc`                    | Generate C++ output (as opposed to SystemC) | Always the same \
+| `--exe`                   | Also build an executable, using the C++ file(s) you list | Always the same \
+| `--build`                 | Run `make` automatically after translating | Always the same \
+| `--top-module guitar_top` | Names the module that is the root of the design | Use the module name from your `.sv` file (not the file name). It must match exactly. \
+| `-CFLAGS "$(sdl2-config --cflags)"`| Tells the C++ compiler where SDL2's headers are | Keep it as is. `sdl2-config` fills in the paths for your system. \
+| `-LDFLAGS "$(sdl2-config --libs)"` | Tells the linker which SDL2 libraries to link | Keep it as is \
+| `vga_sync.sv note_box.sv guitar_top.sv` | Your SystemVerilog sources | List every `.sv` file the design needs. Order doesn't matter. \
+| `tb_main.cpp`             | Your C++ testbench | Exactly one file with `main()` \
 
 ### Where the output name comes from
 
