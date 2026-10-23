@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIF Note Editor</title>
+<style>
+:root{
+  --bg:#14161c; --panel:#1d2029; --line:#2d3140; --text:#d9dce6; --dim:#8a90a3; --accent:#e8b84a;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Trebuchet MS","Segoe UI",sans-serif}
+header{padding:14px 18px 6px}
+h1{margin:0;font-size:18px;font-weight:700;letter-spacing:.2px}
+p.sub{margin:2px 0 0;color:var(--dim);font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 18px;background:var(--panel);border-block:1px solid var(--line)}
+.grp{display:flex;align-items:center;gap:6px}
+label{color:var(--dim);font-size:13px}
+button,select,input{font:inherit;color:var(--text);background:#262a37;border:1px solid var(--line);border-radius:6px;padding:5px 10px}
+button{cursor:pointer}
+button:hover{border-color:#4a5068}
+button.on{background:var(--accent);border-color:var(--accent);color:#1a1405;font-weight:700}
+button.go{background:#2c6e49;border-color:#3d8f61}
+input[type=number]{width:76px}
+input[type=range]{padding:0;width:120px;accent-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#scroller{overflow-x:auto;overflow-y:hidden;margin:14px 18px 0;border:1px solid var(--line);border-radius:8px;background:#101218}
+#inner{position:relative;height:100%}
+canvas{position:sticky;left:0;top:0;display:block;cursor:crosshair}
+#status{margin:10px 18px 0;color:var(--dim);font-size:13px;min-height:20px}
+#counts{margin:4px 18px 0;color:var(--text);font-size:13px}
+.hint{margin:10px 18px 24px;color:var(--dim);font-size:13px;max-width:78ch}
+.dim{color:var(--dim);font-size:13px}
+#tov{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;background:#0a0b0f}
+#tov[hidden]{display:none}
+#twrap{position:relative;flex:1;min-height:0}
+#tc{position:absolute;inset:0;cursor:default}
+#tbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 18px;background:var(--panel);border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>MIF note editor</h1>
+  <p class="sub">Five lanes, 16-bit notes (hold flag + 15-bit frame), one .mif file with a lane header.</p>
+</header>
+
+<div class="bar">
+  <div class="grp" role="group" aria-label="Tool">
+    <button id="t-tap" class="on" data-tool="tap">Tap (1)</button>
+    <button id="t-hold" data-tool="hold">Hold (2)</button>
+    <button id="t-erase" data-tool="erase">Erase (3)</button>
+  </div>
+  <div class="grp"><label for="len">Length (frames)</label><input id="len" type="number" min="100" max="32767" value="3600"></div>
+  <div class="grp"><label for="zoom">Zoom</label><input id="zoom" type="range" min="0.2" max="12" step="0.1" value="2"></div>
+  <div class="grp">
+    <button id="import">Import .mif</button>
+    <button id="export" class="go">Export .mif</button>
+    <button id="clear">Clear all</button>
+    <input id="file" type="file" accept=".mif,.txt" hidden>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="grp"><label for="audio">Audio</label><input id="audio" type="file" accept="audio/*,.mp3"><span id="aname" class="dim">None loaded</span></div>
+  <div class="grp"><label for="fps">Frame rate</label><input id="fps" type="number" min="1" max="240" value="60"></div>
+  <div class="grp"><label for="off" title="Positive moves the audio later, negative earlier. Notes and the beat grid stay put. You can also drag the waveform.">Audio shift (ms)</label><button id="nl" title="Earlier by 10 ms (Shift: 1 ms)">&#9664;</button><input id="off" type="number" step="1" value="0"><button id="nr" title="Later by 10 ms (Shift: 1 ms)">&#9654;</button></div>
+  <div class="grp"><button id="play">Play (Space)</button><button id="rew">Rewind (Home)</button><span id="tdisp" class="dim">Playhead: frame 0 (0.000 s)</span></div>
+  <div class="grp"><button id="testbtn" class="go">Test run</button></div>
+</div>
+
+<div class="bar">
+  <div class="grp"><label for="bpm">Tempo (BPM)</label><input id="bpm" type="number" min="20" max="400" step="0.01" value="120"></div>
+  <div class="grp"><label for="sign">Time signature</label><input id="sign" type="number" min="1" max="32" value="4" style="width:60px"><span class="dim">/</span><select id="sigd"><option>2</option><option selected>4</option><option>8</option><option>16</option></select></div>
+  <div class="grp"><label for="sstart" title="Frame where bar 1, beat 1 sits. Shifting the audio never changes it.">Song start frame</label><input id="sstart" type="number" value="0"><button id="sset">Set to playhead</button></div>
+  <div class="grp"><label for="snapnote">Snap to</label>
+    <select id="snapnote">
+      <option value="1">Whole note</option>
+      <option value="2">Half note</option>
+      <option value="3">Third (half-note triplet)</option>
+      <option value="4">Quarter note</option>
+      <option value="6">Sixth (quarter-note triplet)</option>
+      <option value="8">Eighth note</option>
+      <option value="12">Twelfth (eighth-note triplet)</option>
+      <option value="16" selected>Sixteenth note</option>
+      <option value="24">Twenty-fourth (sixteenth triplet)</option>
+      <option value="32">Thirty-second note</option>
+      <option value="48">Forty-eighth</option>
+      <option value="64">Sixty-fourth note</option>
+    </select>
+  </div>
+  <div class="grp"><label><input type="checkbox" id="grid" checked> Show beat grid</label></div>
+</div>
+
+<div id="scroller"><div id="inner"><canvas id="cv"></canvas></div></div>
+<div id="status">Hover over a lane to place a note.</div>
+<div id="counts"></div>
+<p class="hint">Click an empty spot to place a note with the selected tool. Clicking an existing note applies the selected tool to it (Tap or Hold changes its type, Erase removes it). Right-click always removes. A hold note extends to the next note in its lane; if it is the last note, a dashed default length is shown. The .mif starts with a 10-word header (note count and start address for each lane), followed by the notes of lane 1, then lane 2, and so on with no gaps or terminators. Click the ruler or waveform to move the playhead. Frames are 15 bits, so a chart can span at most 32767 frames (about 9:06 at 60 fps). Test run starts at the playhead; play with D, F, Space, J, K, or tick Auto-play to watch. Tempo, time signature and the beat grid only help with placing notes and are not written to the .mif. Drag the waveform or use the arrows to shift the audio; this never moves notes or the song start frame.</p>
+
+<div id="tov" hidden>
+  <div id="twrap"><canvas id="tc"></canvas></div>
+  <div id="tbar">
+    <label><input type="checkbox" id="auto"> Auto-play</label>
+    <label>Scroll speed <input type="range" id="tspeed" min="2" max="16" step="0.5" value="6"></label>
+    <button id="trestart">Restart</button>
+    <button id="tclose">Close (Esc)</button>
+    <span class="dim">Keys: D F Space J K</span>
+  </div>
+</div>
+
+<script>
+const LANES = 5, MAXF = 0x7FFF, MAX_WORDS = 0xFFFF, HDR = 2 * LANES, PAD = 64, RULER = 72, RH = 28, WAVE = 44, LH = 64;
+const HEAD = 18, NH = 38, BH = 10, DEFAULT_HOLD = 8;
+const COLORS = ['#ff5d73', '#ffb347', '#7bdc65', '#4fc3f7', '#b388ff'];
+
+let lanes = Array.from({length: LANES}, () => []);   // sorted [{f, h}]
+let tool = 'tap', snap = 4, ppf = 2, minLen = 3600, hover = null;
+
+const $ = id => document.getElementById(id);
+const scroller = $('scroller'), inner = $('inner'), cv = $('cv'), ctx = cv.getContext('2d');
+const H = RULER + LANES * LH;
+
+function viewLen() {
+  let m = 0;
+  lanes.forEach(l => l.length && (m = Math.max(m, l[l.length - 1].f)));
+  return Math.min(Math.max(minLen, m + 120), MAXF + 100);
+}
+
+function layout() {
+  const w = PAD + viewLen() * ppf + 80;
+  inner.style.width = w + 'px';
+  inner.style.height = H + 'px';
+  scroller.style.height = (H + 18) + 'px';
+  const dpr = window.devicePixelRatio || 1, cw = scroller.clientWidth;
+  cv.width = cw * dpr; cv.height = H * dpr;
+  cv.style.width = cw + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function draw() {
+  const w = cv.clientWidth, sx = scroller.scrollLeft;
+  ctx.clearRect(0, 0, w, H);
+  ctx.fillStyle = '#101218'; ctx.fillRect(0, 0, w, H);
+
+  drawWave(w, sx);
+  // lane backgrounds
+  for (let l = 0; l < LANES; l++) {
+    ctx.fillStyle = l % 2 ? '#14171f' : '#171a23';
+    ctx.fillRect(0, RULER + l * LH, w, LH);
+  }
+
+  const f0 = Math.max(0, Math.floor((sx - PAD) / ppf)), f1 = Math.ceil((sx + w - PAD) / ppf);
+  const X = f => PAD + f * ppf - sx;
+
+  // minor grid
+  const ss = snapStep(), so = snapOrigin();
+  if (ss * ppf >= 5) {
+    ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let j = Math.ceil((f0 - so) / ss); so + j * ss <= f1; j++) {
+      const x = Math.round(X(Math.round(so + j * ss))) + .5; ctx.moveTo(x, RULER); ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+  }
+  // ruler + major grid
+  const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000].find(s => s * ppf >= 70) || 2000;
+  ctx.fillStyle = '#1d2029'; ctx.fillRect(0, 0, w, RH);
+  ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.fillStyle = '#8a90a3'; ctx.beginPath();
+  for (let f = Math.ceil(f0 / step) * step; f <= f1; f += step) {
+    const x = Math.round(X(f)) + .5;
+    ctx.moveTo(x, RH - 8); ctx.lineTo(x, $('grid').checked ? RH : H);
+    ctx.fillText(f, x + 4, 8);
+  }
+  ctx.stroke();
+  drawBeats(f0, f1, X);
+  // lane dividers
+  ctx.strokeStyle = '#2d3140'; ctx.beginPath();
+  for (let l = 0; l <= LANES; l++) { const y = RULER + l * LH + .5; ctx.moveTo(0, y); ctx.lineTo(w, y); }
+  ctx.stroke();
+
+  // notes
+  for (let l = 0; l < LANES; l++) {
+    const cy = RULER + l * LH + LH / 2, col = COLORS[l], arr = lanes[l];
+    arr.forEach((n, i) => {
+      const x = X(n.f);
+      if (x < -HEAD - 4 && (!arr[i + 1] || X(arr[i + 1].f) < -HEAD)) return;
+      if (x > w + HEAD) return;
+      if (n.h) {
+        const next = arr[i + 1], endX = next ? X(next.f) : X(n.f + DEFAULT_HOLD);
+        ctx.globalAlpha = next ? .85 : .4;
+        ctx.fillStyle = col;
+        if (!next) ctx.setLineDash([4, 3]);
+        ctx.fillRect(x, cy - BH / 2, Math.max(0, endX - x), BH);
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = col;
+      rr(x - HEAD / 2, cy - NH / 2, HEAD, NH, 4); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (n.h) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 3, cy - 3, 6, 6); }
+    });
+  }
+
+  // ghost
+  if (hover && tool !== 'erase') {
+    const cy = RULER + hover.lane * LH + LH / 2, x = X(hover.f);
+    ctx.globalAlpha = .4; ctx.fillStyle = COLORS[hover.lane];
+    rr(x - HEAD / 2, cy - NH / 2, HEAD, NH, 4); ctx.fill(); ctx.globalAlpha = 1;
+  }
+
+  // playhead
+  const px = X(curFrame());
+  if (px >= 0 && px <= w) {
+    ctx.strokeStyle = '#ff4d4d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+  }
+  // lane labels
+  ctx.font = '12px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+  for (let l = 0; l < LANES; l++) {
+    const y = RULER + l * LH + LH / 2;
+    ctx.fillStyle = 'rgba(16,18,24,.88)'; ctx.fillRect(0, y - 11, 52, 22);
+    ctx.fillStyle = COLORS[l]; ctx.fillText('Lane ' + (l + 1), 6, y);
+  }
+}
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ---------- editing ----------
+function pos(e) {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  const lane = Math.floor((y - RULER) / LH);
+  const f = snapFrame((x + scroller.scrollLeft - PAD) / ppf);
+  return {x, y, lane, f};
+}
+function hit(lane, x) {
+  const wx = x + scroller.scrollLeft - PAD;
+  let best = null, bd = HEAD / 2 + 2;
+  lanes[lane].forEach(n => { const d = Math.abs(n.f * ppf - wx); if (d <= bd) { bd = d; best = n; } });
+  return best;
+}
+function addNote(lane, f, h) {
+  const arr = lanes[lane];
+  // Addresses are 16 bits wide, so header + all notes must fit in 0xFFFF words.
+  if (HDR + lanes.reduce((t, l) => t + l.length, 0) + 1 > MAX_WORDS) { alert('The .mif is full: the header plus all notes may use at most 65535 words.'); return; }
+  const i = arr.findIndex(n => n.f >= f);
+  if (i >= 0 && arr[i].f === f) { arr[i].h = h; return; }
+  arr.splice(i < 0 ? arr.length : i, 0, {f, h});
+}
+cv.addEventListener('mousemove', e => {
+  const p = pos(e);
+  hover = p.lane >= 0 && p.lane < LANES ? {lane: p.lane, f: p.f} : null;
+  $('status').textContent = hover ? `Lane ${hover.lane + 1}, frame ${hover.f} (${(hover.f / fps).toFixed(3)} s)` : '';
+  draw();
+});
+cv.addEventListener('mouseleave', () => { hover = null; draw(); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => {
+  const p = pos(e);
+  if (e.button === 0 && p.y < RH) { seekAt(p.x); return; }
+  if (e.button === 0 && p.y < RULER) { wdrag = {x: p.x, s: shiftMs, moved: false}; return; }
+  if (p.lane < 0 || p.lane >= LANES) return;
+  const n = hit(p.lane, p.x);
+  if (e.button === 2 || tool === 'erase') {
+    if (n) lanes[p.lane].splice(lanes[p.lane].indexOf(n), 1);
+  } else if (n) n.h = tool === 'hold';
+  else addNote(p.lane, p.f, tool === 'hold');
+  update();
+});
+
+function update() {
+  $('counts').textContent = lanes.map((l, i) => `Lane ${i + 1}: ${l.length}`).join('    ');
+  layout();
+}
+
+// ---------- controls ----------
+document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  draw();
+}
+addEventListener('keydown', e => {
+  if (testing || /INPUT|SELECT/.test(e.target.tagName)) return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
+  if (e.code === 'Home') { seek(0); scroller.scrollLeft = 0; return; }
+  if (e.key === '1') setTool('tap'); if (e.key === '2') setTool('hold'); if (e.key === '3') setTool('erase');
+});
+$('len').onchange = e => { minLen = Math.max(100, Math.min(MAXF, +e.target.value || 3600)); layout(); };
+$('zoom').oninput = e => { ppf = +e.target.value; layout(); };
+scroller.addEventListener('scroll', draw);
+new ResizeObserver(layout).observe(scroller);
+$('clear').onclick = () => { if (confirm('Remove all notes?')) { lanes = lanes.map(() => []); update(); } };
+
+// ---------- MIF encode / decode ----------
+//
+// FILE LAYOUT (every word is 16 bits, one word per address):
+//
+//   address 0 .. 4    note COUNT of lane 1 .. lane 5
+//   address 5 .. 9    START ADDRESS of lane 1 .. lane 5 (where that lane's first note is stored)
+//   address 10 ..     lane 1 notes, then lane 2 notes, then lane 3, 4, 5, packed back to back
+//
+//   [ counts x5 ][ starts x5 ][ lane 1 notes ][ lane 2 notes ] ... [ lane 5 notes ]
+//
+// Lanes have no terminators and no padding. Lane L occupies addresses
+// start[L] .. start[L] + count[L] - 1, and start[L+1] = start[L] + count[L].
+// Lane 1 always starts at address 10 (right after the header). An empty lane has count 0
+// and a start address equal to where its notes would have begun.
+// Hardware reads count[L] and start[L] first, then reads exactly count[L] words from start[L].
+//
+// NOTE WORD (16 bits):
+//
+//   bit 15      : HOLD flag. 1 = held note, 0 = tap note.
+//   bits 14..0  : FRAME number the note occurs on (0 .. 32767).
+//
+//   e.g. tap at frame 120  -> 0x0078      held note at frame 120 -> 0x8078
+//
+// Notes in each lane are stored in increasing frame order. A held note lasts until the
+// next note in the same lane (or a default length if it is the last note of its lane).
+const HOLD_BIT = 0x8000, FRAME_MASK = 0x7FFF;
+const hex = (v, n) => v.toString(16).toUpperCase().padStart(n, '0');
+const enc = n => (n.h ? HOLD_BIT : 0) | (n.f & FRAME_MASK);        // note -> 16-bit word
+const dec = w => ({f: w & FRAME_MASK, h: !!(w & HOLD_BIT)});       // 16-bit word -> note
+
+function buildMif() {
+  // Header words: counts first, then start addresses.
+  const counts = lanes.map(a => a.length);
+  const starts = [];
+  let addr = HDR;                                  // lane 1 begins right after the 10 header words
+  counts.forEach(c => { starts.push(addr); addr += c; });   // each lane begins where the previous one ends
+  const total = addr;                              // total words = header + all notes
+
+  let out = `-- Rhythm game notes: ${LANES} lanes, 16-bit words, ${total} words total\n`;
+  out += `-- Layout: [counts x${LANES}] [start addresses x${LANES}] [lane 1 notes] [lane 2 notes] ... [lane ${LANES} notes]\n`;
+  out += `-- Header: address 0..${LANES - 1} = note count of lane 1..${LANES}, address ${LANES}..${HDR - 1} = start address of lane 1..${LANES}\n`;
+  out += `-- Note word: bit 15 = hold flag, bits 14..0 = frame number. Notes are sorted by frame within each lane.\n`;
+  out += `-- Lanes are stored back to back with no terminator; lane L spans start[L] .. start[L] + count[L] - 1.\n`;
+  out += `-- Frame rate: ${fps}\n`;
+  out += `DEPTH = ${total};\nWIDTH = 16;\nADDRESS_RADIX = HEX;\nDATA_RADIX = HEX;\nCONTENT\nBEGIN\n`;
+
+  out += `-- Note counts (lane 1..${LANES})\n`;
+  counts.forEach((c, l) => { out += `${hex(l, 4)} : ${hex(c, 4)};\n`; });
+  out += `-- Lane start addresses (lane 1..${LANES})\n`;
+  starts.forEach((s0, l) => { out += `${hex(LANES + l, 4)} : ${hex(s0, 4)};\n`; });
+  lanes.forEach((arr, l) => {
+    out += `-- Lane ${l + 1}: ${arr.length} note${arr.length === 1 ? '' : 's'}, starts at address ${hex(starts[l], 4)}\n`;
+    arr.forEach((n, i) => { out += `${hex(starts[l] + i, 4)} : ${hex(enc(n), 4)};\n`; });
+  });
+  return out + 'END;\n';
+}
+
+$('export').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buildMif()], {type: 'text/plain'}));
+  a.download = 'notes.mif'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+$('import').onclick = () => $('file').click();
+$('file').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  const text = await file.text();
+  const fm = /Frame rate:\s*(\d+)/i.exec(text);
+  if (fm) { fps = Math.max(1, Math.min(240, +fm[1])); $('fps').value = fps; }
+  // Read every "addr : data;" line (and "[a..b] : data;" ranges) into a flat word array.
+  const words = new Array(MAX_WORDS + 1).fill(0);
+  const body = text.split(/BEGIN/i)[1] || '';
+  const re = /^\s*(?:\[\s*([0-9a-f]+)\s*\.\.\s*([0-9a-f]+)\s*\]|([0-9a-f]+))\s*:\s*([0-9a-f]+)\s*;/i;
+  body.split('\n').forEach(line => {
+    const m = re.exec(line); if (!m) return;
+    const a = parseInt(m[1] ?? m[3], 16), b = m[2] ? parseInt(m[2], 16) : a, v = parseInt(m[4], 16);
+    for (let i = a; i <= b && i < words.length; i++) words[i] = v;
+  });
+  // Header: words[0..4] = note counts, words[5..9] = start addresses.
+  // Lane L's notes are the count[L] words beginning at start[L].
+  lanes = lanes.map((_, l) => {
+    const count = words[l], start = words[LANES + l], arr = [];
+    for (let i = 0; i < count && start + i < words.length; i++) arr.push(dec(words[start + i]));
+    return arr.sort((x, y) => x.f - y.f);
+  });
+  update();
+};
+
+// ---------- audio + transport ----------
+let fps = 60, offset = 0, actx = null, buf = null, peaks = null, src = null;
+let playing = false, startCtx = 0, startFrame = 0, stopFrame = 0;
+const ac = () => actx || (actx = new (window.AudioContext || window.webkitAudioContext)());
+const curFrame = () => playing ? startFrame + (actx.currentTime - startCtx) * fps : stopFrame;
+
+function stopSrc() { if (src) { try { src.stop(); } catch (_) {} src.disconnect(); src = null; } }
+function startAt(frame) {
+  const c = ac(); stopSrc(); c.resume();
+  playing = true; startFrame = frame; startCtx = c.currentTime + 0.05;
+  if (buf) {
+    const t = frame / fps + offset;
+    if (t < buf.duration) {
+      src = c.createBufferSource(); src.buffer = buf; src.connect(c.destination);
+      if (t >= 0) src.start(startCtx, t); else src.start(startCtx - t, 0);
+    }
+  }
+}
+function stopPlay() { if (playing) { stopFrame = curFrame(); playing = false; stopSrc(); } }
+function seek(f) { const was = playing; stopPlay(); stopFrame = f; if (was) startAt(f); draw(); updateTime(); }
+function togglePlay() { if (playing) stopPlay(); else { startAt(stopFrame); loop(); } syncUI(); draw(); }
+function syncUI() { $('play').textContent = playing ? 'Pause (Space)' : 'Play (Space)'; }
+function updateTime() { const f = curFrame(); $('tdisp').textContent = `Playhead: frame ${Math.round(f)} (${(f / fps).toFixed(3)} s)`; }
+function loop() {
+  if (!playing || testing) return;
+  const f = curFrame();
+  if (f > viewLen()) { stopPlay(); syncUI(); draw(); return; }
+  scroller.scrollLeft = Math.max(0, PAD + f * ppf - cv.clientWidth * 0.4);
+  draw(); updateTime(); requestAnimationFrame(loop);
+}
+
+$('play').onclick = togglePlay;
+$('rew').onclick = () => { seek(0); scroller.scrollLeft = 0; };
+$('fps').onchange = e => { const f = curFrame(); fps = Math.max(1, Math.min(240, +e.target.value || 60)); e.target.value = fps; seek(f); };
+function setShift(ms) {
+  const f = curFrame(); shiftMs = Math.round(ms * 10) / 10; offset = -shiftMs / 1000;
+  $('off').value = shiftMs; seek(f);
+}
+$('off').onchange = e => setShift(+e.target.value || 0);
+$('nl').onclick = e => setShift(shiftMs - (e.shiftKey ? 1 : 10));
+$('nr').onclick = e => setShift(shiftMs + (e.shiftKey ? 1 : 10));
+document.addEventListener('click', e => { if (e.detail > 0 && e.target.tagName === 'BUTTON') e.target.blur(); });
+
+$('audio').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('aname').textContent = 'Decoding...';
+  try { buf = await ac().decodeAudioData(await f.arrayBuffer()); }
+  catch (_) { $('aname').textContent = 'Could not decode this file.'; return; }
+  const d = buf.getChannelData(0), per = Math.floor(buf.sampleRate / 100);
+  peaks = new Float32Array(Math.ceil(d.length / per));
+  for (let i = 0; i < peaks.length; i++) {
+    let m = 0;
+    for (let j = i * per, e2 = Math.min(d.length, j + per); j < e2; j += 4) { const v = Math.abs(d[j]); if (v > m) m = v; }
+    peaks[i] = Math.sqrt(m);
+  }
+  $('aname').textContent = `${f.name} (${buf.duration.toFixed(1)} s)`;
+  draw();
+};
+
+function drawWave(w, sx) {
+  ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, RH, w, WAVE);
+  if (!peaks) {
+    ctx.fillStyle = '#4a5068'; ctx.font = '12px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+    ctx.fillText('No audio loaded', PAD + 6, RH + WAVE / 2); return;
+  }
+  const mid = RH + WAVE / 2;
+  ctx.fillStyle = 'rgba(79,195,247,.75)';
+  for (let x = 0; x < w; x++) {
+    const t0 = ((sx + x - PAD) / ppf) / fps + offset, t1 = ((sx + x + 1 - PAD) / ppf) / fps + offset;
+    const i0 = Math.max(0, Math.floor(t0 * 100)), i1 = Math.min(peaks.length - 1, Math.ceil(t1 * 100));
+    if (t1 < 0 || i0 >= peaks.length) continue;
+    let m = 0;
+    for (let i = i0; i <= i1; i++) if (peaks[i] > m) m = peaks[i];
+    const h = m * (WAVE - 6) / 2;
+    ctx.fillRect(x, mid - h, 1, Math.max(1, h * 2));
+  }
+}
+
+// ---------- test run ----------
+let testing = false, testFrom = 0, testEnd = 0, tn = [], st = {score: 0, combo: 0, best: 0, perfect: 0, good: 0, miss: 0};
+let msg = '', msgC = '', msgT = 0;
+const down = [false, false, false, false, false], flash = [0, 0, 0, 0, 0];
+const KEYS = ['KeyD', 'KeyF', 'Space', 'KeyJ', 'KeyK'], KEYL = ['D', 'F', 'Space', 'J', 'K'];
+const tc = $('tc'), tctx = tc.getContext('2d');
+const say = (m, c) => { msg = m; msgC = c; msgT = performance.now(); };
+
+function sizeT() {
+  const wrap = $('twrap'), d = window.devicePixelRatio || 1, w = wrap.clientWidth, h = wrap.clientHeight;
+  tc.width = w * d; tc.height = h * d; tc.style.width = w + 'px'; tc.style.height = h + 'px';
+  tctx.setTransform(d, 0, 0, d, 0, 0);
+}
+function startTest() {
+  tn = lanes.map(a => a.map((n, i) => ({
+    f: n.f, h: n.h, end: n.h ? (a[i + 1] ? a[i + 1].f : n.f + DEFAULT_HOLD) : n.f, s: n.f < testFrom ? 1 : 0
+  })));
+  st = {score: 0, combo: 0, best: 0, perfect: 0, good: 0, miss: 0};
+  testEnd = Math.max(testFrom, ...tn.map(a => a.length ? a[a.length - 1].end : 0));
+  down.fill(false); flash.fill(0); msg = '';
+  startAt(testFrom - 1.5 * fps);
+}
+function openTest() {
+  stopPlay(); syncUI(); testFrom = Math.max(0, Math.round(stopFrame));
+  document.activeElement.blur(); $('tov').hidden = false; testing = true;
+  sizeT(); startTest(); tloop();
+}
+function closeTest() { testing = false; stopPlay(); $('tov').hidden = true; stopFrame = testFrom; syncUI(); draw(); updateTime(); }
+$('testbtn').onclick = openTest;
+$('tclose').onclick = closeTest;
+$('trestart').onclick = () => { document.activeElement.blur(); startTest(); };
+addEventListener('resize', () => testing && sizeT());
+
+function hitNote(l, n, d) {
+  const p = d <= 0.05 * fps;
+  n.s = n.h ? 3 : 1;
+  if (p) st.perfect++; else st.good++;
+  st.combo++; st.best = Math.max(st.best, st.combo);
+  st.score += Math.round((p ? 300 : 100) * (1 + Math.min(st.combo, 50) / 50));
+  say(p ? 'Perfect' : 'Good', p ? '#e8b84a' : '#7bdc65'); flash[l] = 1;
+}
+function miss(n, m) { n.s = 2; st.miss++; st.combo = 0; say(m, '#ff5d73'); }
+
+function tick(cur) {
+  const win = 0.12 * fps, auto = $('auto').checked;
+  tn.forEach((arr, l) => {
+    for (const n of arr) {
+      if (n.f > cur + win) break;
+      if (n.s === 0) {
+        if (auto && cur >= n.f) hitNote(l, n, 0);
+        else if (cur - n.f > win) miss(n, 'Miss');
+      }
+      if (n.s === 3 && cur >= n.end) n.s = 1;
+    }
+  });
+}
+
+addEventListener('keydown', e => {
+  if (!testing) return;
+  if (e.code === 'Escape') { closeTest(); return; }
+  const l = KEYS.indexOf(e.code);
+  if (l < 0) return;
+  e.preventDefault();
+  if (e.repeat) return;
+  down[l] = true; flash[l] = Math.max(flash[l], 0.6);
+  if ($('auto').checked) return;
+  const cur = curFrame(), win = 0.12 * fps;
+  const n = tn[l].find(n => n.s === 0 && Math.abs(n.f - cur) <= win);
+  if (n) hitNote(l, n, Math.abs(n.f - cur));
+});
+addEventListener('keyup', e => {
+  if (!testing) return;
+  const l = KEYS.indexOf(e.code);
+  if (l < 0) return;
+  down[l] = false;
+  if ($('auto').checked) return;
+  const n = tn[l].find(n => n.s === 3);
+  if (n) { if (curFrame() >= n.end - 0.12 * fps) n.s = 1; else miss(n, 'Dropped'); }
+});
+
+function tloop() {
+  if (!testing) return;
+  const cur = curFrame(); tick(cur); drawTest(cur);
+  requestAnimationFrame(tloop);
+}
+
+function drawTest(cur) {
+  const c = tctx, w = tc.clientWidth, h = tc.clientHeight;
+  const LW = Math.min(96, (w - 20) / 5), x0 = (w - LW * 5) / 2, hy = h - 90, sp = +$('tspeed').value;
+  const Y = f => hy - (f - cur) * sp;
+  c.clearRect(0, 0, w, h);
+  for (let l = 0; l < LANES; l++) {
+    c.fillStyle = l % 2 ? '#10131a' : '#131720'; c.fillRect(x0 + l * LW, 0, LW, h);
+    if (down[l]) flash[l] = Math.max(flash[l], 0.4);
+    if (flash[l] > 0.02) {
+      c.globalAlpha = flash[l] * 0.35; c.fillStyle = COLORS[l]; c.fillRect(x0 + l * LW, 0, LW, hy); c.globalAlpha = 1;
+      flash[l] *= 0.9;
+    }
+    c.fillStyle = '#2d3140'; c.fillRect(x0 + l * LW, 0, 1, h);
+  }
+  c.fillRect(x0 + 5 * LW, 0, 1, h);
+  c.fillStyle = 'rgba(255,255,255,.7)'; c.fillRect(x0, hy - 1, LW * 5, 2);
+
+  // notes
+  tn.forEach((arr, l) => {
+    const cx = x0 + l * LW + LW / 2, hw = LW - 16;
+    for (const n of arr) {
+      const y = Y(n.f), ye = Y(n.end);
+      if (y < -30) break;
+      if (n.s === 1 || (y > h + 30 && ye > h + 30)) continue;
+      const holding = n.s === 3, yh = holding ? hy : y;
+      c.globalAlpha = n.s === 2 ? 0.3 : 1; c.fillStyle = COLORS[l];
+      if (n.h && ye < yh) { c.globalAlpha *= 0.8; c.fillRect(cx - 6, ye, 12, yh - ye); c.globalAlpha = n.s === 2 ? 0.3 : 1; }
+      c.beginPath(); c.roundRect(cx - hw / 2, yh - 12, hw, 24, 5); c.fill();
+      c.strokeStyle = 'rgba(255,255,255,.6)'; c.lineWidth = 1.5; c.stroke();
+      if (n.h) { c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(cx - 4, yh - 4, 8, 8); }
+      c.globalAlpha = 1;
+    }
+  });
+
+  // key labels
+  c.font = '13px "Trebuchet MS",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (let l = 0; l < LANES; l++) {
+    const kx = x0 + l * LW + LW / 2, lit = down[l] || flash[l] > 0.5;
+    c.fillStyle = lit ? COLORS[l] : '#262a37'; c.beginPath(); c.roundRect(kx - 26, hy + 24, 52, 30, 6); c.fill();
+    c.fillStyle = lit ? '#14161c' : '#8a90a3'; c.fillText(KEYL[l], kx, hy + 39);
+  }
+
+  // HUD
+  c.fillStyle = '#d9dce6'; c.textBaseline = 'top'; c.textAlign = 'left'; c.font = '700 22px "Trebuchet MS",sans-serif';
+  c.fillText(String(st.score).padStart(7, '0'), 16, 14);
+  c.textAlign = 'center';
+  if (st.combo > 1) { c.font = '700 28px "Trebuchet MS",sans-serif'; c.fillText(st.combo + ' combo', w / 2, 46); }
+  const age = performance.now() - msgT;
+  if (msg && age < 500) {
+    c.globalAlpha = 1 - age / 500; c.fillStyle = msgC; c.font = '700 20px "Trebuchet MS",sans-serif';
+    c.fillText(msg, w / 2, hy - 110); c.globalAlpha = 1;
+  }
+  if (cur > testEnd + 0.8 * fps) {
+    c.fillStyle = 'rgba(10,11,15,.85)'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#d9dce6'; c.font = '700 30px "Trebuchet MS",sans-serif'; c.fillText('Finished', w / 2, h / 2 - 70);
+    c.font = '20px "Trebuchet MS",sans-serif';
+    c.fillText('Score ' + st.score, w / 2, h / 2 - 22);
+    c.fillText(`Perfect ${st.perfect}   Good ${st.good}   Miss ${st.miss}   Best combo ${st.best}`, w / 2, h / 2 + 14);
+    c.fillStyle = '#8a90a3'; c.font = '14px "Trebuchet MS",sans-serif';
+    c.fillText('Restart or press Esc to return to the editor', w / 2, h / 2 + 56);
+  }
+}
+
+// ---------- tempo, time signature, audio shift ----------
+let bpm = 120, sigN = 4, sigD = 4, songStart = 0, snapNote = 16, shiftMs = 0, wdrag = null;
+
+const snapStep = () => (fps * 60 / bpm) * 4 / snapNote;   // frames per snap step (a whole note is 4 quarter notes)
+const snapOrigin = () => songStart;
+function snapFrame(raw) {
+  const s = snapStep(), o = snapOrigin();
+  return Math.max(0, Math.min(MAXF, Math.round(Math.round((raw - o) / s) * s + o)));
+}
+const seekAt = x => seek(Math.max(0, Math.round((x + scroller.scrollLeft - PAD) / ppf)));
+
+function drawBeats(f0, f1, X) {
+  if (!$('grid').checked) return;
+  const bf = (fps * 60 / bpm) * 4 / sigD, barF = bf * sigN;   // frames per beat / per bar
+  const k0 = Math.ceil((f0 - songStart) / bf), k1 = Math.floor((f1 - songStart) / bf);
+  const stride = Math.max(1, Math.ceil(30 / (barF * ppf)));
+  const showBeats = bf * ppf >= 4;
+  ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
+  for (let k = k0; k <= k1; k++) {
+    const bar = ((k % sigN) + sigN) % sigN === 0;
+    if (!bar && !showBeats) continue;
+    const x = Math.round(X(songStart + k * bf)) + .5;
+    ctx.strokeStyle = bar ? 'rgba(232,184,74,.5)' : 'rgba(255,255,255,.16)';
+    ctx.beginPath(); ctx.moveTo(x, bar ? RH - 8 : RULER); ctx.lineTo(x, H); ctx.stroke();
+    if (bar) {
+      const b = k / sigN;
+      if (((b % stride) + stride) % stride === 0) { ctx.fillStyle = '#e8b84a'; ctx.fillText(String(b + 1), x + 4, 20); }
+    }
+  }
+}
+
+const num = (el, lo, hi, d) => Math.max(lo, Math.min(hi, +el.value || d));
+$('bpm').onchange = e => { bpm = num(e.target, 20, 400, 120); e.target.value = bpm; draw(); };
+$('sign').onchange = e => { sigN = Math.round(num(e.target, 1, 32, 4)); e.target.value = sigN; draw(); };
+$('sigd').onchange = e => { sigD = +e.target.value; draw(); };
+$('sstart').onchange = e => { songStart = Math.round(num(e.target, -MAXF, MAXF, 0)); e.target.value = songStart; draw(); };
+$('sset').onclick = () => { songStart = Math.round(curFrame()); $('sstart').value = songStart; draw(); };
+$('snapnote').onchange = e => { snapNote = +e.target.value; draw(); };
+$('grid').onchange = () => draw();
+
+// drag the waveform to shift the audio (a click without movement seeks instead)
+addEventListener('mousemove', e => {
+  if (!wdrag) return;
+  const dx = e.clientX - cv.getBoundingClientRect().left - wdrag.x;
+  if (Math.abs(dx) > 3) wdrag.moved = true;
+  if (wdrag.moved) {
+    shiftMs = Math.round(wdrag.s + dx / ppf / fps * 1000); offset = -shiftMs / 1000;
+    $('off').value = shiftMs; draw();
+  }
+});
+addEventListener('mouseup', () => {
+  if (!wdrag) return;
+  const d = wdrag; wdrag = null;
+  if (d.moved) seek(curFrame()); else seekAt(d.x);
+});
+
+update();
+</script>
+</body>
+</html>
