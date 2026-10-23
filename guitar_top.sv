@@ -11,7 +11,7 @@ module guitar_top (
 );
     logic [9:0] x, y;
     logic       visible, frame_tick;
-
+	// moses was here
     vga_sync sync (.clk50, .rst, .hsync, .vsync, .x, .y, .visible, .frame_tick);
 
     // ---- Strum: two pins, one action, detected as an edge ----
