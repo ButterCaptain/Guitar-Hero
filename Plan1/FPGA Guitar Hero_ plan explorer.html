@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FPGA Guitar Hero: plan explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f5f2;--sf:#fff;--ink:#16211c;--mut:#5b6b63;--ln:#c9d3cd;--ac:#0e6b4f;--acs:#d8efe6;--warn:#a85a00;--ws:#fdeccf;--bad:#b3261e;--note:#0e6b4f;--hold:#2a5db0;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f1613;--sf:#17211c;--ink:#e3ece7;--mut:#93a69b;--ln:#2c3b33;--ac:#4cc79b;--acs:#183a2d;--warn:#f0b35a;--ws:#3a2a10;--bad:#ff8a80;--note:#4cc79b;--hold:#7fa9ee}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f1613;--sf:#17211c;--ink:#e3ece7;--mut:#93a69b;--ln:#2c3b33;--ac:#4cc79b;--acs:#183a2d;--warn:#f0b35a;--ws:#3a2a10;--bad:#ff8a80;--note:#4cc79b;--hold:#7fa9ee}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:22px 0 8px}
+p{margin:6px 0}.mut{color:var(--mut)}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0;border-bottom:1px solid var(--ln);padding-bottom:10px}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--sf);border:1px solid var(--ln);border-radius:6px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--ac)}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+nav button[aria-selected=true]{background:var(--ac);color:var(--bg);border-color:var(--ac)}
+.panel{display:none}.panel.on{display:block}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+.arrow{color:var(--mut)}
+.blk{position:relative;text-align:left;min-width:120px;padding:10px 12px;border-radius:8px}
+.blk.sel{background:var(--acs);border-color:var(--ac)}
+.blk .w{position:absolute;top:-8px;right:-6px;background:var(--warn);color:var(--bg);border-radius:10px;font-size:11px;padding:0 6px}
+.detail{background:var(--sf);border:1px solid var(--ln);border-radius:8px;padding:12px 14px;margin-top:10px}
+.says{background:var(--ws);border-left:4px solid var(--warn);padding:8px 12px;margin:10px 0;border-radius:0 6px 6px 0}
+.says b{color:var(--warn)}
+.card{background:var(--sf);border:1px solid var(--ln);border-radius:8px;padding:12px 14px;margin:10px 0}
+.bits{display:flex;gap:3px;flex-wrap:wrap;margin:8px 0}
+.bit{width:26px;height:32px;border:1px solid var(--ln);display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;border-radius:4px}
+.bit.h{background:var(--hold);color:var(--bg)}.bit.f{background:var(--acs)}
+.slots{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:8px 0}
+.slot{border:1px solid var(--ln);border-radius:6px;min-height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:12px;background:var(--sf)}
+.slot.n{background:var(--note);color:var(--bg)}.slot.s,.slot.e{background:var(--hold);color:var(--bg)}
+.slot.late{outline:2px solid var(--bad)}
+.t{color:var(--ac);font-weight:600}.f0{color:var(--mut)}
+.mem{display:flex;gap:4px;flex-wrap:wrap}
+.mem span{border:1px solid var(--ln);border-radius:4px;padding:2px 6px;font-family:"IBM Plex Mono",monospace;font-size:12px}
+.mem .cur{border-color:var(--ac);background:var(--acs)}.mem .done{opacity:.45}
+.tl{display:flex;gap:2px;margin:10px 0;overflow-x:auto}
+.cell{flex:1 0 24px;height:38px;border:1px solid var(--ln);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:12px;font-family:"IBM Plex Mono",monospace}
+.cell.w{background:var(--acs)}.cell.n{background:var(--note);color:var(--bg)}.cell.now{outline:2px solid var(--ink)}
+.big{font-size:20px;font-weight:600}
+label{display:inline-flex;align-items:center;gap:6px}
+input[type=number]{width:90px;background:var(--sf);border:1px solid var(--ln);border-radius:6px;padding:5px}
+select{background:var(--sf);border:1px solid var(--ln);border-radius:6px;padding:5px}
+</style>
+</head>
+<body>
+<main>
+<h1>FPGA guitar hero: plan explorer</h1>
+<p class="mut">Select a block, edit a note word, step the loader, or play the hit window. Amber boxes mark issues with the current plan.</p>
+<nav role="tablist" id="tabs"></nav>
+
+<section class="panel" id="p0">
+  <h2>Block diagram</h2>
+  <p class="mut">Select a block. A badge marks blocks with an issue.</p>
+  <div class="row" id="r1"></div>
+  <div class="row" id="r2"></div>
+  <div class="row" id="r3"></div>
+  <div class="detail" id="detail"></div>
+</section>
+
+<section class="panel" id="p1">
+  <h2>Note word encoding</h2>
+  <p>One 16-bit word per note: 1 hold bit and a 15-bit frame number.</p>
+  <div class="row">
+    <label>Frame <input type="number" id="fr" min="0" max="32767" value="10"></label>
+    <label>Entry <select id="ty"><option value="0">Regular note</option><option value="1">Held note: start</option><option value="2">Held note: end</option></select></label>
+  </div>
+  <div class="card"><div class="bits" id="bits"></div><p class="mono" id="hex"></p><p id="tydesc"></p></div>
+  <div class="says"><b>Claude says:</b> A held end entry (hold bit 0) has the same bit pattern as a regular note. Your ignore logic is therefore required, and it needs one state flop, <code>lastWasHoldStart</code>. Set it when a word with hold = 1 is loaded and the flop was 0. When the flop is 1, treat the next word as the end marker and clear the flop. A more robust alternative is to widen the word to a 2-bit type field (regular, start, end) and use 14 bits for the frame number. The type then travels with the word and no state is needed.</div>
+</section>
+
+<section class="panel" id="p2">
+  <h2>Lane loader simulation</h2>
+  <p>One lane. The shift register has 8 slots. A note should arrive at slot 7 (the hit line) on its own frame. Red outline: the note reached the hit line at the wrong frame.</p>
+  <div class="row">
+    <button id="step">Step</button><button id="play">Play</button><button id="rst">Reset</button>
+    <label>Condition <select id="mode"><option value="plan">As planned</option><option value="fix">Suggested fix</option></select></label>
+  </div>
+  <div class="card">
+    <p>frame# = <span class="big mono" id="sF">0</span> &nbsp; notesUsed = <span class="mono" id="sN">0</span> / <span class="mono" id="sT">0</span> &nbsp; currentAddr = <span class="mono" id="sA">0</span></p>
+    <p class="mut">Slot 0 is the entry point. Slot 7 is the hit line.</p>
+    <div class="slots" id="slots"></div>
+    <p class="mut">ROM contents (frame number, hold bit). Highlighted: next word to load.</p>
+    <div class="mem" id="mem"></div>
+  </div>
+  <div class="card"><b>Load condition this frame</b><div id="cond" class="mono"></div></div>
+  <div class="says" id="simsays"></div>
+</section>
+
+<section class="panel" id="p3">
+  <h2>Hit detection window</h2>
+  <p>A note sits at frame 10. The FSM starts listening at frame − radius and stops at frame + radius. A strum is an edge, so each press of Strum registers once.</p>
+  <div class="row">
+    <label>Radius <input type="number" id="rad" min="0" max="5" value="2"></label>
+    <label><input type="checkbox" id="fret" checked> Fret held</label>
+    <button id="hs">Step</button><button id="hp">Play</button><button id="hr">Reset</button>
+    <button id="hstrum">Strum (edge)</button>
+  </div>
+  <div class="tl" id="tl"></div>
+  <div class="card">
+    <p>frame = <span class="mono" id="hF">0</span> &nbsp; state = <span class="t mono" id="hSt">IDLE</span> &nbsp; pressednote = <span class="mono" id="hP">0</span> &nbsp; score = <span class="big mono" id="hSc">0</span></p>
+    <p id="hLog" class="mut">Step to the window, then press Strum while the fret is held.</p>
+  </div>
+  <div class="says"><b>Claude says:</b> (1) The plan checks the fret when the strum edge occurs and latches <code>pressednote</code>. That is correct. The scoring line uses <code>presseddown</code>, which looks like a naming slip for <code>pressednote</code>. (2) No rule exists for a note that leaves the window without any strum. The end of the window already gives a trigger: if <code>pressednote</code> is 0 at <code>end noteDetect</code>, score down. The plan covers this with the else branch, so keep it. (3) Strums while a wrong fret is held should count as a miss. Compare the full 5-bit fret vector against the lane mask, not one fret. (4) Resolution is one display row. A faster tick for detection fixes this. (5) Held notes remain undefined. A simple model: strum at start window, fret must stay down until the end frame, add score each frame, release early ends the hold. (6) Add a synchronizer and debouncer on strum and frets before edge detection.</div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const tabs=["Overview","Note format","Loader sim","Hit detection"];
+tabs.forEach((t,i)=>{const b=document.createElement("button");b.textContent=t;b.setAttribute("role","tab");b.onclick=()=>show(i);$("tabs").appendChild(b)});
+function show(i){document.querySelectorAll(".panel").forEach((p,j)=>p.classList.toggle("on",i===j));[...$("tabs").children].forEach((b,j)=>b.setAttribute("aria-selected",i===j));try{history.replaceState(null,"","#t"+i)}catch(e){}}
+
+/* Overview */
+const B={
+rom:{t:"Note ROM (MIF)",r:1,plan:"Note words are stored in on-chip memory, loaded from a MIF file. The header holds a note count and a start address per lane.",iss:"The Cyclone II on-chip RAM (M4K) has a synchronous read: data appears one clock after the address. Five lanes sharing one memory would also conflict. Use one small ROM per lane. Each lane then starts at address 0 and the header is not needed. The note count can be a constant or the first word of each ROM. Evaluate the load condition one cycle after changing the address."},
+ld:{t:"Load condition",r:1,plan:"Each frame, if notesUsed < totalNotes and one of three terms holds, the note at currentAddr is pushed into noteBuffer and notesUsed increments. Terms: next note frame matches the lookahead, the previous note is held, or frame# ≤ 8.",iss:"(1) Equality can be missed and then the lane stalls forever. Use noteFrame ≤ frame# + lookahead. (2) The frame# ≤ 8 term loads a note on each of the first 8 frames regardless of its time. Remove it; the lookahead comparison already handles early notes. (3) The held-previous term loads the next note immediately after a held start. This also breaks timing; the end marker should obey the same frame comparison. (4) Address: currentAddr = startAddr + notesUsed, and the comparison reads mem[currentAddr] with no offset. (5) Mask the hold bit before comparing."},
+hold:{t:"Held-note flag",r:1,plan:"The second word of a held note has hold bit 0. Hardware must ignore it as a new note so it does not create additional held notes.",iss:"Use one flop, lastWasHoldStart, to mark the next word as an end marker. A 2-bit type field in the word removes the need for this state."},
+buf:{t:"noteBuffer ×5",r:1,plan:"Each lane has an 8-slot shift register. A note enters at one end and shifts each frame toward the hit line.",iss:"16 bits per slot is more than the display needs. Two or three bits per slot (empty, note, hold start, hold end or body) is enough. The frame number is already implied by the slot position."},
+disp:{t:"Display rows",r:1,plan:"Each display row, adjusted for perspective, reads its slot in the noteBuffer and turns on or off."},
+cnt:{t:"frame# counter",r:2,plan:"A universal counter shared by all lanes. earliestFrameDisplayed is also universal.",iss:"earliestFrameDisplayed is redundant if the lookahead is a constant. Use frame# + 7 as the comparison target. If music will play, lock this counter to the audio clock and add a calibration offset."},
+in:{t:"Fret and strum inputs",r:3,plan:"Fret buttons and a strum input. Strum is an edge, not a level.",iss:"Mechanical inputs bounce. Add a two-flop synchronizer and a debounce before edge detection."},
+fsm:{t:"Note detect FSM",r:3,plan:"At note frame − radius the FSM starts listening. A strum edge with the fret held latches pressednote. At note frame + radius it scores up if pressednote is set, otherwise down. A strum outside any window scores down.",iss:"Held notes are undefined. Chords need a rule (all lanes must match, or score per lane). A strum with wrong or extra frets should be a miss. See the Hit detection tab."},
+sc:{t:"Score",r:3,plan:"Increments or decrements from the FSM outcome."}
+};
+let sel="rom";
+function drawBlocks(){
+  [1,2,3].forEach(r=>$("r"+r).innerHTML="");
+  const order=[["rom",1],["ld",1],["hold",1],["buf",1],["disp",1],["cnt",2],["in",3],["fsm",3],["sc",3]];
+  order.forEach(([k,r],i)=>{
+    const b=document.createElement("button");b.className="blk"+(k===sel?" sel":"");b.textContent=B[k].t;
+    if(B[k].iss){const w=document.createElement("span");w.className="w";w.textContent="issue";b.appendChild(w)}
+    b.onclick=()=>{sel=k;drawBlocks()};
+    $("r"+r).appendChild(b);
+    const nxt=order[i+1];if(nxt&&nxt[1]===r&&!(k==="cnt")){const a=document.createElement("span");a.className="arrow";a.textContent="→";$("r"+r).appendChild(a)}
+  });
+  const d=B[sel];
+  $("detail").innerHTML="<b>"+d.t+"</b><p>"+d.plan+"</p>"+(d.iss?'<div class="says"><b>Claude says:</b> '+d.iss+"</div>":'<p class="mut">No issues noted for this block.</p>')+
+   ({ld:"<p class='mut'>Open the Loader sim tab to watch this condition run.</p>",fsm:"<p class='mut'>Open the Hit detection tab to run the window.</p>",hold:"<p class='mut'>Open the Note format tab to edit a word.</p>",buf:"<p class='mut'>The hit-line slot (slot 7) also feeds the detect FSM.</p>"}[sel]||"");
+}
+drawBlocks();
+
+/* Note format */
+function drawBits(){
+  const f=Math.max(0,Math.min(32767,+$("fr").value||0)),t=+$("ty").value;
+  const hb=t===1?1:0,w=(hb<<15)|f;let h="";
+  for(let i=15;i>=0;i--){const v=(w>>i)&1;h+='<div class="bit '+(i===15?"h":"f")+'">'+v+"</div>"}
+  $("bits").innerHTML=h;
+  $("hex").textContent="0x"+w.toString(16).toUpperCase().padStart(4,"0")+"  (bit 15 = hold, bits 14:0 = frame "+f+")";
+  $("tydesc").textContent=["Regular note: hold bit 0. It is a note on its own.","Held start: hold bit 1. The hardware sets lastWasHoldStart.","Held end: hold bit 0, same bits as a regular note. The hardware must treat it as an end marker because lastWasHoldStart is 1, and then clear the flag."][t];
+}
+$("fr").oninput=drawBits;$("ty").onchange=drawBits;drawBits();
+
+/* Loader sim */
+const MEM=[[3,0],[6,0],[10,1],[14,0],[18,0],[22,0]],LOOK=7;
+let S;
+function reset(){S={f:0,used:0,buf:Array(8).fill(null),lws:false,why:""};render()}
+function terms(){
+  const m=$("mode").value,n=S.used<MEM.length,cur=MEM[S.used];
+  const nf=cur?cur[0]:null,atEnd=S.buf[6]&&S.buf[6].type==="s";
+  if(m==="plan")return{m,n,a:cur&&nf===S.f+LOOK,b:!!atEnd,c:S.f<=8,fire:n&&(cur&&nf===S.f+LOOK||!!atEnd||S.f<=8)};
+  return{m,n,a:cur&&nf<=S.f+LOOK,fire:n&&cur&&nf<=S.f+LOOK};
+}
+function step(){
+  const t=terms();
+  const old=S.buf;S.buf=[null,...old.slice(0,7)];
+  if(t.fire){const e=MEM[S.used];const isEnd=S.lws;S.buf[0]={f:e[0],type:isEnd?"e":e[1]?"s":"n"};S.lws=e[1]&&!isEnd?true:false;S.used++}
+  S.f++;render(t);
+}
+function tf(v){return '<span class="'+(v?"t":"f0")+'">'+(v?"TRUE":"false")+"</span>"}
+function render(t){
+  t=terms();
+  $("sF").textContent=S.f;$("sN").textContent=S.used;$("sT").textContent=MEM.length;$("sA").textContent="start+"+S.used;
+  $("slots").innerHTML=S.buf.map((x,i)=>{
+    if(!x)return '<div class="slot">'+(i===7?"hit<br>line":i)+"</div>";
+    const late=i===7&&x.f!==S.f-1+0&&false;
+    return '<div class="slot '+x.type+'" data-i="'+i+'">'+{n:"note",s:"hold▸",e:"▸end"}[x.type]+"<br>f"+x.f+"</div>"}).join("");
+  $("mem").innerHTML=MEM.map((e,i)=>'<span class="'+(i===S.used?"cur":i<S.used?"done":"")+'">'+e[0]+","+e[1]+"</span>").join("");
+  let h="<p>Mode: "+(t.m==="plan"?"as planned":"suggested fix")+"</p><p>notesUsed &lt; total: "+tf(t.n)+"</p>";
+  if(t.m==="plan")h+="<p>next frame == frame#+"+LOOK+": "+tf(t.a)+"<br>buffer slot 7 is a held start: "+tf(t.b)+"<br>frame# ≤ 8: "+tf(t.c)+"</p>";
+  else h+="<p>next frame ≤ frame#+"+LOOK+": "+tf(t.a)+"</p>";
+  h+="<p>Result: "+(t.fire?"load note":"no load")+"</p>";$("cond").innerHTML=h;
+  // lateness check: a note in slot 7 should have f === current frame - 1 +1 ; frame already incremented
+  document.querySelectorAll("#slots .slot[data-i='7']").forEach(el=>{const x=S.buf[7];if(x&&x.f!==S.f-1)el.classList.add("late")});
+  $("simsays").innerHTML=t.m==="plan"
+   ?"<b>Claude says:</b> Step five times. The frame# ≤ 8 term loads one note every frame at the start, so notes enter the shift register far earlier than their time. The held-previous term does the same for the end marker after the held start. Switch to “Suggested fix”, which compares noteFrame ≤ frame# + lookahead and loads each note only when it is within the window. Red outlines mark notes that reach the hit line off time."
+   :"<b>Claude says:</b> With the ≤ comparison every note reaches slot 7 on its own frame. The held end marker is still loaded through the same comparison, and the lastWasHoldStart flop marks it as an end instead of a new note.";
+}
+$("step").onclick=()=>{if(S.f<40)step()};
+$("rst").onclick=()=>{stopSim();reset()};
+$("mode").onchange=()=>{stopSim();reset()};
+let simT=null;function stopSim(){clearInterval(simT);simT=null;$("play").textContent="Play"}
+$("play").onclick=()=>{if(simT){stopSim();return}$("play").textContent="Pause";simT=setInterval(()=>{if(S.f>=40){stopSim();return}step()},500)};
+reset();
+
+/* Hit detection */
+const NF=10,END=20;let H;
+function hreset(){H={f:0,st:"IDLE",p:0,sc:0,log:"Step to the window, then press Strum while the fret is held.",strum:false};hrender()}
+function rad(){return Math.max(0,Math.min(5,+$("rad").value||0))}
+function inWin(f){return f>=NF-rad()&&f<=NF+rad()}
+function hstep(){
+  if(H.f>=END)return;H.f++;
+  const f=H.f;
+  if(f===NF-rad()&&rad()>=0){H.st="LISTEN";H.p=0;H.log="Window opened. Listening for a strum edge."}
+  if(H.st==="LISTEN"&&f===NF+rad()+1){
+    H.st="IDLE";if(H.p){H.sc++;H.log="Window closed with pressednote = 1: score up."}else{H.sc--;H.log="Window closed with no valid strum: score down (miss)."}
+  }
+  hrender();
+}
+function hstrum(){
+  if(H.f>=END)return;
+  if(inWin(H.f)&&H.st==="LISTEN"){
+    if($("fret").checked){H.p=1;H.log="Strum edge with fret held at frame "+H.f+": pressednote latched."}
+    else{H.log="Strum edge but fret not held: no latch. Window will end as a miss."}
+  }else{H.sc--;H.log="Strum outside the window: score down."}
+  hrender();
+}
+function hrender(){
+  $("hF").textContent=H.f;$("hSt").textContent=H.st;$("hP").textContent=H.p;$("hSc").textContent=H.sc;$("hLog").textContent=H.log;
+  let h="";for(let i=0;i<=END;i++)h+='<div class="cell'+(i===NF?" n":inWin(i)?" w":"")+(i===H.f?" now":"")+'">'+i+"</div>";
+  $("tl").innerHTML=h;
+}
+$("hs").onclick=hstep;$("hstrum").onclick=hstrum;$("rad").onchange=hreset;
+$("hr").onclick=()=>{stopH();hreset()};
+let hT=null;function stopH(){clearInterval(hT);hT=null;$("hp").textContent="Play"}
+$("hp").onclick=()=>{if(hT){stopH();return}$("hp").textContent="Pause";hT=setInterval(()=>{if(H.f>=END){stopH();return}hstep()},600)};
+hreset();
+
+const start=parseInt((location.hash||"#t0").slice(2))||0;show(Math.min(3,start));
+</script>
+</body>
+</html>

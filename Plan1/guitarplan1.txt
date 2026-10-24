@@ -1,0 +1,118 @@
+Note data type 
+--------------------------------------
+
+16 bit (or 15 of storage is an issue)
+
+Regular note
+■□□□□□□□□□□□□□□□□
+^		^
+hold bit	frame# 15 bits
+(0 for not held)
+
+
+held note	∨ starting frame	∨ ending frame
+■□□□□□□□□□□□□□□□□	■□□□□□□□□□□□□□□□□
+^		^
+hold bit	frame# 15 bits  ^
+(1 for held)			(this bit is 1, since it is the second part of held note)
+				(hardware needed to make sure that this note is ignored so that it doesn't continuously make more held notes)
+
+
+Stored in on-chip memory, loading via mif file
+
+mif file header looks like this (for example)
+encodes the amount of notes in each lane and the start address for each lane (doesn't include effect lanes yet)
+
+-- Note counts (lane 1..5)
+0000 : 0014;
+0001 : 0011;
+0002 : 0016;
+0003 : 0004;
+0004 : 0005;
+-- Lane start addresses (lane 1..5)
+0005 : 000A;
+0006 : 001E;
+0007 : 002F;
+0008 : 0045;
+0009 : 0049;
+
+Display
+---------------------------------------
+□ < display lane
+□ < each row (when accounting for perspective) checks its respective noteBuffer to see if it should be on or off
+□
+□
+□
+□
+□
+
+⌈	⌉
+noteBuff ---*--- (memory)
+⌊	⌋
+    ^
+    16 bit wide 8 big long shift register
+    (Each lane has one of these)
+
+important values
+
+notesUsed, startAddr, currentAddr, frame#, noteframe, earliestFrameDisplayed
+
+notesused and startAddr, and curentaddr specific to the lane
+noteframe is 	------------------------specific to individual frames
+frame# and earliestframedisplayed ------are universal
+
+currentAddr = startAddr + notesused < (claude said not * 16, I'm not sure)
+
+each frame, notebuffer will load a note at currentAddr if the following condition is met
+
++++++++++++++++++++++++++
+notesUsed < totalNotes
+	&		(claude said 1, note 16)
+(noteMem[currentAddr + 1] == frame# - earliestFrameDisplayed) OR noteBuffer[7][1] == 1 OR frame# <= 8 
+  ^
+ frame# of next note in memory to be loaded				^ if prev note is held ^ first 8 frames
++++++++++++++++++++++++++
+
+do:
+
+add note at mem location to notebuffer
+noteused++
+
+Note detection
+----------------------------------------
+
+    start noteDetect
+    ∨
+□□▨■▨□□
+       ^
+	end noteDetect
+
+when notedetect clockedge up
+fsm starts listening for pressednote
+
+!important strum is not on/off but detects clockedge 
+
+□ = empty frame
+▨ = noteframe + or - notedetectRadius
+■ = note frame
+
+for unheld notes:
+
+if(strum && noteheld when notedetect)
+	pressednote == 1
+
+if(presseddown when endnote detect)
+	score up
+else
+	score down
+
+for held notes:
+
+? I dunno
+
+(also if strum when !notedetect score down)
+
+
+
+
+
