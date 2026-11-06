@@ -2,6 +2,12 @@
 Junior Design Competition
 
 
+To do list: 
+- Holds effects pulls controls.
+- Squares to indcate button pressing (Wyatt)
+- Import Audio (Full audio without splitting)
+- Effects (2 More lanes) Reads in effects
+
 
 
 ## Running the simulation (Verilator + SDL2)

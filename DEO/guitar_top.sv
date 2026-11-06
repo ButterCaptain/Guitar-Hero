@@ -86,6 +86,7 @@ module guitar_top (
 
     always_comb begin
         {r, g, b} = 12'h111;
+        // Draw the Strum
         if (strum_px) {r, g, b} = 12'hFFF;
         for (int k = 0; k < NUM_LANES; k++) begin
             if (zone_px[k])
