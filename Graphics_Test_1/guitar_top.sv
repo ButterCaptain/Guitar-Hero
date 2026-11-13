@@ -11,9 +11,11 @@ module guitar_top (
     input  logic               strum_down,
     output logic               hsync,
     output logic               vsync,
-    output logic [3:0]         r,
-    output logic [3:0]         g,
-    output logic [3:0]         b,
+    output logic               vga_clk,   // 25 MHz pixel clock for the ADV7123
+    output logic               blank_n,   // active low DAC blanking
+    output logic [COLOR_BITS-1:0] r,
+    output logic [COLOR_BITS-1:0] g,
+    output logic [COLOR_BITS-1:0] b,
     output logic signed [15:0] score
 );
     // The 2D Array where the notes are held
@@ -31,8 +33,11 @@ module guitar_top (
         .clk50      (clk50),
         .rst        (rst),
         .slots      (slots),
+        .frets      (fret),
         .hsync      (hsync),
         .vsync      (vsync),
+        .vga_clk    (vga_clk),
+        .blank_n    (blank_n),
         .frame_tick (frame_tick),
         .vga_r      (r),
         .vga_g      (g),

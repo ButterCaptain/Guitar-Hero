@@ -54,15 +54,17 @@ package highway_pkg;
     //   top:    272, 291, 310, 329, 348, 368
     //   bottom: 32, 147, 262, 377, 492, 608
 
-    // --- lane colours (4 bits per channel) --------------------------------
-    localparam logic [3:0] LANE_R [0:4] = '{
-        4'd2, 4'd15, 4'd15, 4'd0, 4'd15
+    // --- lane colours (8 bits per channel, DE2-115 / ADV7123) ----------
+    localparam int COLOR_BITS = 8;
+
+    localparam logic [7:0] LANE_R [0:4] = '{
+        8'd46, 8'd255, 8'd255, 8'd0, 8'd255
     };
-    localparam logic [3:0] LANE_G [0:4] = '{
-        4'd12, 4'd4, 4'd13, 4'd7, 4'd8
+    localparam logic [7:0] LANE_G [0:4] = '{
+        8'd204, 8'd65, 8'd220, 8'd116, 8'd133
     };
-    localparam logic [3:0] LANE_B [0:4] = '{
-        4'd4, 4'd3, 4'd0, 4'd13, 4'd1
+    localparam logic [7:0] LANE_B [0:4] = '{
+        8'd64, 8'd54, 8'd0, 8'd217, 8'd27
     };
 
     // --- perspective row table --------------------------------------------

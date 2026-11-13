@@ -1,5 +1,7 @@
 import highway_pkg::*;
 
+
+//  The throwaway note generator is gone. `slots` is now driven by
 //  note_feeder, which reads the chart out of notes.hex.
 module guitar_top (
     input  logic               clk50,
@@ -9,9 +11,11 @@ module guitar_top (
     input  logic               strum_down,
     output logic               hsync,
     output logic               vsync,
-    output logic [3:0]         r,
-    output logic [3:0]         g,
-    output logic [3:0]         b,
+    output logic               vga_clk,   // 25 MHz pixel clock for the ADV7123
+    output logic               blank_n,   // active low DAC blanking
+    output logic [COLOR_BITS-1:0] r,
+    output logic [COLOR_BITS-1:0] g,
+    output logic [COLOR_BITS-1:0] b,
     output logic signed [15:0] score
 );
     // The 2D Array where the notes are held
@@ -21,21 +25,45 @@ module guitar_top (
     // Counts the frames
     logic [14:0] frame_count;
     logic song_done;
+    // Per-lane "a held note is over the hit line, the user should be holding
+    // this fret". The hit-detect FSM can just AND this with `fret`.
+    logic [N_LANES-1:0] hold_line;
 
     highway_draw draw_unit (
         .clk50      (clk50),
         .rst        (rst),
         .slots      (slots),
+        .frets      (fret),      // which frets the player is holding, for the glow
         .hsync      (hsync),
         .vsync      (vsync),
+        .vga_clk    (vga_clk),
+        .blank_n    (blank_n),
         .frame_tick (frame_tick),
         .vga_r      (r),
         .vga_g      (g),
-        .vga_b      (b)
+        .vga_b      (b),
+        .hold_line  (hold_line)
     );
 
-    // Reads notes.hex and pushes notes onto the far end of the highway.
+    // Reads the note chart and pushes notes onto the far end of the highway.
+    //
+    // HEXFILE is handed to $readmemh, which resolves a relative path against
+    // the WORKING DIRECTORY OF THE PROCESS -- not against the directory this
+    // .sv file lives in. Verilog has no notion of "next to the source file".
+    // So this path assumes you launch from the project root, where notes.hex
+    // sits beside the sources:
+    //
+    //     ./obj_dir/guitar_sim          <- works, cwd is the project root
+    //     cd obj_dir && ./guitar_sim    <- FAILS, no notes.hex in that cwd
+    //
+    // If the file cannot be opened, Verilator prints ONE warning
+    // ("$readmem file not found") and then carries on with the ROM full of
+    // zeros. Zeros mean note_count = 0 for every lane, so the feeder decides
+    // the song is over on frame one and not a single note ever spawns -- an
+    // empty highway that otherwise looks perfectly healthy. If you see no
+    // notes, scroll up and check for that warning first.
     note_feeder #(
+        .HEXFILE("notes.hex"),
         .ADDR_W (11)
     ) feeder (
         .clk50       (clk50),

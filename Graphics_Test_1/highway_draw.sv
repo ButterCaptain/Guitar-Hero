@@ -75,14 +75,20 @@ module highway_draw (
     // slots[lane][0]           = right at the hit line (closest to you)
     // slots[lane][N_SLOTS-1]   = far end of the highway (the horizon)
     input  logic [N_LANES-1:0][N_SLOTS-1:0][1:0] slots,
+    input logic [N_LANES-1:0] frets,
 
     // ---- VGA out -----------------------------------------------------------
     output logic       hsync,
     output logic       vsync,
     output logic       frame_tick,       // one pulse per frame, drives the game
-    output logic [3:0] vga_r,
-    output logic [3:0] vga_g,
-    output logic [3:0] vga_b,
+    output logic       vga_clk,          // 25 MHz pixel clock -> VGA_CLK pin
+    output logic       blank_n,          // active low -> VGA_BLANK_N pin
+    // Width comes from COLOR_BITS so the palette, this bus and the glow
+    // accumulator can never disagree. Hardcoding [3:0] here while the
+    // package said COLOR_BITS=8 is what produced the banding.
+    output logic [COLOR_BITS-1:0] vga_r,
+    output logic [COLOR_BITS-1:0] vga_g,
+    output logic [COLOR_BITS-1:0] vga_b,
 
     // ---- game logic out ----------------------------------------------------
     // "IS THE USER SUPPOSED TO BE HOLDING A FRET RIGHT NOW?"
@@ -120,6 +126,10 @@ module highway_draw (
     localparam logic [9:0] TOP_ROW = 10'(TOP_Y);    // first row of the highway
     localparam logic [9:0] BOT_ROW = 10'(BOT_Y);    // last row = the hit line
 
+    // Glow Stuff
+    // How many scanlines tall the white glow is at the hit line
+    localparam int GLOW_HEIGHT = 64;
+
     // ========================================================================
     //  STAGE 1 -- WHERE IS THE BEAM?
     // ========================================================================
@@ -139,7 +149,9 @@ module highway_draw (
         .x          (x),
         .y          (y),
         .visible    (visible),
-        .frame_tick (frame_tick)
+        .frame_tick (frame_tick),
+        .vga_clk    (vga_clk),
+        .blank_n    (blank_n)
     );
 
     // ========================================================================
@@ -449,14 +461,27 @@ module highway_draw (
     //      3. the white wireframe on top of everything
     // ========================================================================
 
-    logic [3:0] draw_r, draw_g, draw_b;
+    logic [COLOR_BITS-1:0] draw_r, draw_g, draw_b;
     logic [1:0] note_cell;   // what is in this pixel's cell of the chart
+
+    // Glow Stuff
+    logic [9:0] glow_dist; 
+    // COLOR_BITS:0 is NINE bits for an 8-bit colour: eight for the sum plus one
+    // on top to catch the carry. Declared [COLOR_BITS-1:0] there is no carry bit
+    // to test -- the overflow just vanishes and bright pixels wrap to dark.
+    logic [COLOR_BITS:0] r_add, g_add, b_add;
 
     always_comb begin
         // ---- layer 1: background ------------------------------------------
-        draw_r = 4'h0;
-        draw_g = 4'h0;
-        draw_b = 4'h0;
+        draw_r = '0;
+        draw_g = '0;
+        draw_b = '0;
+
+
+        glow_dist = 10'd0;
+        r_add     = '0;
+        g_add     = '0;
+        b_add     = '0;
 
         // ---- look up this pixel's cell -------------------------------------
         // "which lane"  x  "how far away"  ->  one cell of the chart.
@@ -488,11 +513,35 @@ module highway_draw (
             draw_b = LANE_B[lane_idx] >> TAIL_DIM_SHIFT;
         end
 
+        // Button Pressing Glow 
+        // Is it in the highway, is the fret pressed, and is it in the glow area?
+        if(in_highway && frets[lane_idx] && (y >= (BOT_ROW - 10'(GLOW_HEIGHT))) && (y <= BOT_ROW)) begin
+
+            glow_dist = y - (BOT_ROW - 10'(GLOW_HEIGHT));
+
+            // shift left by 2 maps our 0-64 distance to 0-256 (the 8-bit colour range)
+            // Both sides are widened to 9 bits explicitly so the carry lands in
+            // bit 8 and nothing is truncated on the way: the worst case is
+            // 255 + 256 = 511, which is exactly what 9 bits holds.
+            r_add = {1'b0, draw_r} + 9'(glow_dist << 2);
+            g_add = {1'b0, draw_g} + 9'(glow_dist << 2);
+            b_add = {1'b0, draw_b} + 9'(glow_dist << 2);
+
+            // If the 9th bit (the carry) is set the sum went past 255, so clamp to
+            // pure white instead of letting it wrap around to dark.
+            // Test bit [COLOR_BITS] -- the carry. Testing [COLOR_BITS-1:0]
+            // instead asks "are the low 8 bits non-zero", which is true for
+            // almost every pixel and would paint the whole glow solid white.
+            draw_r = r_add[COLOR_BITS] ? '1 : r_add[COLOR_BITS-1:0];
+            draw_g = g_add[COLOR_BITS] ? '1 : g_add[COLOR_BITS-1:0];
+            draw_b = b_add[COLOR_BITS] ? '1 : b_add[COLOR_BITS-1:0];
+        end
+
         // ---- layer 3: the wireframe, last so it is always on top -----------
         if (on_outline) begin
-            draw_r = 4'hF;
-            draw_g = 4'hF;
-            draw_b = 4'hF;
+            draw_r = '1;        // all ones, whatever COLOR_BITS is
+            draw_g = '1;
+            draw_b = '1;
         end
     end
 
@@ -505,9 +554,9 @@ module highway_draw (
     // ========================================================================
 
     always_comb begin
-        vga_r = visible ? draw_r : 4'h0;
-        vga_g = visible ? draw_g : 4'h0;
-        vga_b = visible ? draw_b : 4'h0;
+        vga_r = visible ? draw_r : '0;
+        vga_g = visible ? draw_g : '0;
+        vga_b = visible ? draw_b : '0;
     end
 
 endmodule

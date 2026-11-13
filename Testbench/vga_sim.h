@@ -12,7 +12,7 @@ struct VgaTiming {
 
     // 640x480 @ 60 Hz , 25 Mhz pixel clock for the DEO 4 bit color
     static VgaTiming vga640x480(){
-        return {640, 16, 96, 48, 480, 10, 2, 33, true, 4}; 
+        return {640, 16, 96, 48, 480, 10, 2, 33, true, 8}; 
     }
 
     // 800x600 @ 60 Hz, 40 MHz pixel clock, active high
@@ -41,6 +41,10 @@ class VgaSim{
                                     SDL_TEXTUREACCESS_STREAMING, t.h_vis, t.v_vis);
             // Max color value
             max_val_ = (1 << t.bits_per_channel) - 1;
+            // Pre-compute value -> 8-bit once, instead of doing three integer
+            // divides for every single visible pixel (307,200 pixels x 3 = most
+            // of a million divides per frame). At 8 bits this is the identity.
+            for (int i = 0; i <= max_val_; i++) lut_[i] = (uint8_t)(i * 255 / max_val_);
             // Get current time
             t0_ = SDL_GetTicks();
         }
@@ -76,9 +80,9 @@ class VgaSim{
         int y = line_ctr_ - t_.v_bp;
 
         if (synced_ && x >= 0 && x < t_.h_vis && y >= 0 && y < t_.v_vis) {
-            uint32_t r8 = r * 255 / max_val_;
-            uint32_t g8 = g * 255 / max_val_;
-            uint32_t b8 = b * 255 / max_val_;
+            uint32_t r8 = lut_[r];
+            uint32_t g8 = lut_[g];
+            uint32_t b8 = lut_[b];
             fb_[y * t_.h_vis + x] = 0xFF000000 | (r8 << 16) | (g8 << 8) | b8;
         }
 
@@ -125,6 +129,7 @@ class VgaSim{
     SDL_Texture*  tex_ = nullptr;
 
     int  x_ctr_ = 0, line_ctr_ = 0, frames_ = 0, max_val_ = 15;
+    uint8_t lut_[256] = {0};   // colour value -> 8-bit, filled in the ctor
     int keys_ = 0;
     bool prev_h_ = false, prev_v_ = false;
     bool synced_ = false, running_ = true;

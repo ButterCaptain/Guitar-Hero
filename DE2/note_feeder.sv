@@ -13,7 +13,48 @@ import highway_pkg::*;
 // bit 15 -> flag if its a hold note (1), or standard tap note (0)
 // bits 14:0 -> the exact video frame where the note appears (spawn it at the top)
 
+// HOW A HELD NOTE IS ENCODED IN THE CHART
+// ---------------------------------------
+// A hold is TWO entries in notes.hex: the hold itself (bit 15 set) and then the
+// next note in that same lane, which is the RELEASE point. The gap between the
+// two is the length of the hold. Looking at lane 3 of the demo chart:
+//
+//      frame 186  hold      <- strum here, start holding
+//      frame 250  plain     <- let go here. 64 frames long.
+//      frame 442  hold      <- next hold, 192 frames later
+//      frame 506  plain     <- let go
+//
+// So the plain note at 250 is NOT something to hit. It just marks the end.
+//
+// WHAT THIS MODULE WRITES INTO `slots` (this is the whole contract with
+// highway_draw -- it does no hold bookkeeping of its own, it just paints what
+// it finds here)
+//
+//      CELL_NOTE      a note to hit: a tap, OR the head of a hold. Drawn as a
+//                     full-width rectangle either way.
+//      CELL_HOLD      the tail body trailing BEHIND a hold head. Drawn as a
+//                     thin line. The player should be holding the fret while
+//                     these are crossing the hit line.
+//      CELL_HOLD_END  the release marker. Drawn as NOTHING -- it is where the
+//                     tail stops, not a note.
+//      CELL_EMPTY     nothing here.
+//
+// WHICH WAY THE TAIL POINTS
+// -------------------------
+// Notes travel from the far end of the queue (slot N_SLOTS-1, the horizon)
+// toward slot 0 (the hit line). The HEAD arrives first and the tail follows it,
+// so the tail lives in HIGHER slot numbers than the head -- above it on screen.
+// That is why the tail is written by the shift below, one cell per frame, after
+// the head has already been pushed in:
+//
+//      slot:      ... 127     126     125     124  ...
+//      frame T:       HEAD
+//      frame T+1:     tail    HEAD
+//      frame T+2:     tail    tail    HEAD
+//      frame T+3:     END     tail    tail    HEAD      <- release marker lands
+
 module note_feeder #(
+    parameter string HEXFILE = "notes.hex",  // Read in these value to ROM 
     parameter int    ADDR_W  = 11            // 2048 words, raise for longer songs
 )(
     input  logic clk50,
@@ -32,11 +73,11 @@ module note_feeder #(
     logic [15:0]       rom_data; // This this is where incoming rom data goes
 
     // Instantiate the note_rom.sv
-    rom_init #(
+    note_rom #(
         .DATA_W (16),
         .ADDR_W (ADDR_W),
-        .DATASIZE(1024)
-    )u_rom (
+        .HEXFILE(HEXFILE)
+    ) u_rom (
         .clk (clk50),
         .addr(addr),
         .dout(rom_data)
@@ -62,6 +103,12 @@ module note_feeder #(
     logic [3:0]  hdr_idx;    // 0..9 while reading the header
     logic [2:0]  lane;       // 0..4 while scanning lanes, 5 means "done"
 
+    // One bit per lane: "I have pushed a hold head and have not yet seen the
+    // note that releases it." While this is set, every cell this module shifts
+    // in at the far end becomes tail instead of empty. Five flip-flops is the
+    // entire cost of drawing held notes -- highway_draw needs no state at all.
+    logic [N_LANES-1:0] in_hold;
+
     always_ff @(posedge clk50) begin
         if (rst) begin
             state       <= S_HDR_ADDR;
@@ -70,6 +117,7 @@ module note_feeder #(
             addr        <= '0;
             frame_count <= 15'd0;
             slots       <= '0;
+            in_hold     <= '0;
             for (int k = 0; k < N_LANES; k++) begin
                 note_count[k] <= 16'd0;
                 note_start[k] <= 16'd0;
@@ -111,9 +159,18 @@ module note_feeder #(
                 if (frame_tick) begin
                     // This makes the animation for the notes moving down
                     for (int L = 0; L < N_LANES; L++) begin
-                        // Drop slot 0 (it just reached the player) and push an
-                        // empty cell in at the far end.
-                        slots[L] <= { CELL_EMPTY, slots[L][N_SLOTS-1:1] };
+                        // Drop slot 0 (it just reached the player) and push a
+                        // new cell in at the far end. Normally that cell is
+                        // empty -- but if this lane is in the middle of a hold,
+                        // it is a piece of the tail. One cell per frame is
+                        // exactly what makes the tail stretch out behind the
+                        // head as the head moves down the highway.
+                        //
+                        // If a note is due this frame, S_NOTE_CHECK overwrites
+                        // this same cell a few cycles from now, so a real note
+                        // always wins over a tail cell.
+                        slots[L] <= { in_hold[L] ? CELL_HOLD : CELL_EMPTY,
+                                      slots[L][N_SLOTS-1:1] };
                     end
                     // Increment frame count
                     frame_count <= frame_count + 15'd1;
@@ -150,8 +207,27 @@ module note_feeder #(
                 // arrive to a frame late.
                 if (rom_data[14:0] <= frame_count) begin
                     // Spawn it at the far end of the highway. rom_data[15] is
-                    // the hold flag.
-                    slots[lane][N_SLOTS-1] <= rom_data[15] ? CELL_HOLD : CELL_NOTE;
+                    // the hold flag. Three cases:
+                    if (rom_data[15]) begin
+                        // HOLD HEAD. It is a note you strum, so graphically it
+                        // is an ordinary rectangle -- CELL_NOTE. Setting
+                        // in_hold is what makes every following frame trail a
+                        // tail cell in behind it.
+                        slots[lane][N_SLOTS-1] <= CELL_NOTE;
+                        in_hold[lane]          <= 1'b1;
+                    end
+                    else if (in_hold[lane]) begin
+                        // RELEASE MARKER. This lane is mid-hold, so this note
+                        // is not something to hit -- it is where the tail ends.
+                        // CELL_HOLD_END draws as nothing, and clearing in_hold
+                        // stops the tail from growing any further.
+                        slots[lane][N_SLOTS-1] <= CELL_HOLD_END;
+                        in_hold[lane]          <= 1'b0;
+                    end
+                    else begin
+                        // Ordinary tap note.
+                        slots[lane][N_SLOTS-1] <= CELL_NOTE;
+                    end
                     note_ptr[lane] <= note_ptr[lane] + 16'd1;
                     state <= S_NOTE_ADDR;     // same lane check for a chord
                 end
