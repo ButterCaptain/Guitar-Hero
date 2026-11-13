@@ -3,9 +3,10 @@ Junior Design Competition
 
 
 To do list: 
-- Holds effects pulls controls.
-- Squares to indcate button pressing (Wyatt)
 - Import Audio (Full audio without splitting)
+- Create a module to display score on the 7 segment display
+- Create a Block diagram of the system
+- Start working on the MidProject report (we only need one Testbench + waveform)
 - Effects (2 More lanes) Reads in effects
 
 
