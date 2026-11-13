@@ -15,18 +15,20 @@ module hit_detect #(
     input logic [N_LANES-1:0] hold_line,
 
     // Output the score
-    output logic signed [15:0] score, 
+    output logic signed [15:0] score
 );
     // Edge detection for the strum input -----
     logic raw_strum, strum_prev, strum_edge; 
-    assign raw_strumm = strum_up | strum_down;
+    assign raw_strum = strum_up | strum_down;
 
     always_ff @(posedge clk50) begin
-        if (rst) strum_prev <= 1'b0;
+        if (rst) begin
+            strum_prev <= 1'b0;
+        end 
         else strum_prev <= raw_strum;
     end
 
-    assign strum_edge = strum_raw && !strum_prev; 
+    assign strum_edge = raw_strum && !strum_prev; 
     //=------------------------------------
 
     logic strum_pending; 
@@ -49,7 +51,7 @@ module hit_detect #(
     // State machine to handle the hit detection
     typedef enum logic [1:0] {
         READY, // listening for a strum
-        COOLDOWN, // A note was hit let is slide out of the hit window
+        COOLDOWN // A note was hit let is slide out of the hit window
     } hit_state_t;
 
     // Initialize the state machine
@@ -102,23 +104,48 @@ module hit_detect #(
                     // then go to cooldown state
                     READY: begin 
                         if(strum_pending) begin
-                            if (fret_match) begin
-                                score <= score + 16'sd100;
-                            end
-                            else begin
-                                score <= score - 16'sd50;
-                            end
                             // set it back to 0 so we don't double count the strum
                             strum_pending <= 1'b0;
-                            state <= COOLDOWN;
+
+                            if (fret_match) begin
+                                score <= score + 16'sd10;
+                                cooldown_cnt <= HIT_WINDOW - 1; // load the timer
+                                state <= COOLDOWN;
+                            end
+                            else begin
+                                score <= score - 16'sd5;
+                            end
+                            
                         end
                         else if (note_at_bottom) begin
-                            score <= score - 16'sd50;
+                            score <= score - 16'sd5;
                         end
-                    end 
+                        else begin 
+                            // Check for hold_line when not strumming
+                            // if the lane is a hold line and the fret of the same hold line 
+                            // keep giving points
+                            for (int L = 0; L < N_LANES; L++) begin
+                                if (hold_line[L]) begin
+                                    if(fret[L]) score <= score + 16'sd1;
+                                    else        score <= score - 16'sd1;
+                                
+                                end
+                            end
+                        
+                        end 
+                    end
 
                     // Cool down stat that just waits until the count reaches 0 then goes back to ready
                     COOLDOWN: begin
+                        
+                        // Need to check for hold lines during cooldown too
+                        for (int L = 0; L < N_LANES; L++) begin
+                            if (hold_line[L]) begin
+                                if (fret[L]) score <= score + 16'sd1;
+                                else         score <= score - 16'sd1;
+                            end
+                        end
+
                         // Ignore strums when coodling down
                         strum_pending <= 1'b0;
                         if (cooldown_cnt == 0) begin
@@ -126,7 +153,6 @@ module hit_detect #(
                         end
                         else begin
                             cooldown_cnt <= cooldown_cnt - 1'b1;
-                            state <= READY;
                         end
                     end
 

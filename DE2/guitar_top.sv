@@ -74,9 +74,18 @@ module guitar_top (
         .song_done   (song_done)
     );
 
-    // Placeholder until the hit-detect FSM exists.
-    always_comb begin
-        score = 16'sd0;
-    end
+    hit_detect #(
+        .HIT_WINDOW(4)
+    ) hit_unit (
+        .clk50       (clk50),
+        .rst         (rst),
+        .frame_tick  (frame_tick),
+        .fret        (fret),
+        .strum_up    (strum_up),
+        .strum_down  (strum_down),
+        .slots       (slots),
+        .hold_line   (hold_line),
+        .score       (score)
+    );
 
 endmodule
