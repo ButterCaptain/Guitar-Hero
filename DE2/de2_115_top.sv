@@ -144,6 +144,9 @@ module de2_115_top (
     logic [31:0] effect_word;
     // ===============================================================
 
+    score_top u_score (
+        .score       (score)
+    );
 
 
     guitar_top u_game (
