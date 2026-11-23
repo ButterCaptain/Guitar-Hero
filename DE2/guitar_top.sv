@@ -16,7 +16,14 @@ module guitar_top (
     output logic [COLOR_BITS-1:0] r,
     output logic [COLOR_BITS-1:0] g,
     output logic [COLOR_BITS-1:0] b,
-    output logic signed [15:0] score
+    output logic signed [15:0] score,
+
+
+
+    // effects
+    output logic               effect_fire,   // one-clock pulse: an effect is due
+    output logic [31:0]        effect_word    // its effects.hex word
+    // ===============================================================
 );
     // The 2D Array where the notes are held
     logic [N_LANES-1:0][N_SLOTS-1:0][1:0] slots;
@@ -42,7 +49,14 @@ module guitar_top (
         .vga_r      (r),
         .vga_g      (g),
         .vga_b      (b),
-        .hold_line  (hold_line)
+        .hold_line  (hold_line),
+
+
+
+        // ==================== EFFECTS (new) ====================
+        .effect_fire (effect_fire),
+        .effect_word (effect_word)
+        // =======================================================
     );
 
     // Reads the note chart and pushes notes onto the far end of the highway.
@@ -71,7 +85,14 @@ module guitar_top (
         .frame_tick  (frame_tick),
         .slots       (slots),
         .frame_count (frame_count),
-        .song_done   (song_done)
+        .song_done   (song_done),
+
+
+
+        // ==================== EFFECTS (new) ====================
+        .effect_fire (effect_fire),
+        .effect_word (effect_word)
+        // =======================================================
     );
 
     hit_detect #(

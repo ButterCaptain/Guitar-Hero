@@ -77,6 +77,14 @@ module highway_draw (
     input  logic [N_LANES-1:0][N_SLOTS-1:0][1:0] slots,
     input logic [N_LANES-1:0] frets,  // "the user should be holding this fret"
 
+
+
+    // ======================== EFFECTS (new) ========================
+    // From note_feeder's effects reader, through guitar_top.
+    input  logic        effect_fire,     // one-clock pulse: an effect is due
+    input  logic [31:0] effect_word,     // its effects.hex word
+    // ===============================================================
+
     // ---- VGA out -----------------------------------------------------------
     output logic       hsync,
     output logic       vsync,
@@ -183,8 +191,23 @@ module highway_draw (
     logic [9:0] last_x;
     logic       new_line;
 
+    logic [7:0] flashTimer;
+
+    logic flash_on;
+    assign flash_on = (flashTimer != 0);
+   
+
     always_ff @(posedge clk50) begin
         last_x <= x;
+    end
+
+    always_ff @(posedge clk50) begin
+        if(rst)
+            flashTimer <= '0;
+        else if(effect_fire && effect_word[18:15] == '0) // flash
+            flashTimer <= 8'd8;
+        else if (frame_tick && flashTimer != 0)
+            flashTimer <= flashTimer - 1'b1;
     end
 
     always_comb begin
@@ -480,6 +503,12 @@ module highway_draw (
         draw_r = '0;
         draw_g = '0;
         draw_b = '0;
+
+        if (flash_on) begin
+            draw_r = flashTimer << 4;
+            draw_g = flashTimer << 4;
+            draw_b = flashTimer << 4;
+        end
 
         // The glow's working signals need a default on EVERY path through this
         // block, not just inside the glow's `if`. Without these, a pixel that

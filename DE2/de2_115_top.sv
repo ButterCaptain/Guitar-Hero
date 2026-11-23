@@ -135,6 +135,17 @@ module de2_115_top (
 
     logic signed [15:0] score;
 
+
+
+    // effects 
+    // effect_fire pulses for one clock when an effect in effects.hex is
+    // due; effect_word is that effect's 32-bit word. Nothing uses them yet.
+    logic        effect_fire;
+    logic [31:0] effect_word;
+    // ===============================================================
+
+
+
     guitar_top u_game (
         .clk50      (CLOCK_50),
         .rst        (game_rst),
@@ -148,7 +159,14 @@ module de2_115_top (
         .r          (VGA_R),
         .g          (VGA_G),
         .b          (VGA_B),
-        .score      (score)
+        .score      (score),
+
+
+
+        // ==================== EFFECTS (new) ====================
+        .effect_fire (effect_fire),
+        .effect_word (effect_word)
+        // =======================================================
     );
 
     // Sync-on-green off. The ADV7123 wants this input high for normal RGB.

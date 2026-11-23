@@ -2,3 +2,4 @@ obj_dir/
 *.png
 *.o
 *.out
+Testbench/build_audio/

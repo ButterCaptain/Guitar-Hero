@@ -63,23 +63,32 @@ module note_feeder #(
 
     output logic [N_LANES-1:0][N_SLOTS-1:0][1:0] slots,
     output logic [14:0] frame_count,         // frames since reset
-    output logic        song_done            // 1 when every lane is used up
+    output logic        song_done,           // 1 when every lane is used up
+
+    // Effects (see "EFFECTS READER" below). Nothing acts on these yet.
+    output logic        effect_fire,         // one-clock pulse: an effect is due now
+    output logic [31:0] effect_word          // its whole effects.hex word, valid with effect_fire
 );
 
     // number of header words at the top of the hex file
     localparam int HDR_WORDS = 2 * N_LANES;  // 2 * 5 lanes = 10 
 
     logic [ADDR_W-1:0] addr; // Address holder
+    logic [ADDR_W-1:0] effectAddr;
     logic [15:0]       rom_data; // This this is where incoming rom data goes
+    logic [31:0]       effect_rom_data;
 
     // Instantiate the note_rom.sv
     note_rom #(
         .DATA_W (16),
+        .EFFECT_DATA_W(32),
         .ADDR_W (ADDR_W),
         .HEXFILE(HEXFILE)
     ) u_rom (
         .clk (clk50),
         .addr(addr),
+        .effectAddr(effectAddr),
+        .effectDout(effect_rom_data),
         .dout(rom_data)
     );
 
@@ -109,6 +118,27 @@ module note_feeder #(
     // entire cost of drawing held notes -- highway_draw needs no state at all.
     logic [N_LANES-1:0] in_hold;
 
+    // ---- EFFECTS READER ------------------------------------------------------
+    // effects.hex layout:
+    //   word 0       how many effects there are (N)
+    //   words 1..N   one effect each, SORTED BY FRAME
+    //                  bits 14:0  the frame it happens on
+    //                  bits 31:15 free for you: which effect, how long, colour...
+    //
+    // effectAddr is the pointer: it always sits on the next effect that has
+    // not fired yet, and effect_rom_data shows that word one clock later.
+    // This runs at the same time as the note state machine, using the ROM's
+    // second read port, so the two never wait for each other.
+    typedef enum logic [1:0] {
+        FX_HDR,         // read word 0 (the count)
+        FX_IDLE,        // wait for the next video frame
+        FX_WAIT,        // ROM takes one cycle to answer
+        FX_CHECK        // is the effect at effectAddr due?
+    } fx_state_t;
+
+    fx_state_t         fx_state;
+    logic [ADDR_W-1:0] effect_count;
+
     always_ff @(posedge clk50) begin
         if (rst) begin
             state       <= S_HDR_ADDR;
@@ -118,6 +148,13 @@ module note_feeder #(
             frame_count <= 15'd0;
             slots       <= '0;
             in_hold     <= '0;
+
+            effectAddr   <= '0;
+            fx_state     <= FX_HDR;
+            effect_count <= '0;
+            effect_fire  <= 1'b0;
+            effect_word  <= '0;
+
             for (int k = 0; k < N_LANES; k++) begin
                 note_count[k] <= 16'd0;
                 note_start[k] <= 16'd0;
@@ -238,6 +275,42 @@ module note_feeder #(
             end
 
             default: state <= S_WAIT_TICK;
+            endcase
+
+            // ---- effects reader --------------------------------------------
+            effect_fire <= 1'b0;
+
+            case (fx_state)
+
+            // effectAddr is 0 coming out of reset, and the ROM has been
+            // reading word 0 every clock, so the count is already there.
+            FX_HDR: begin
+                effect_count <= effect_rom_data[ADDR_W-1:0];
+                effectAddr   <= ADDR_W'(1);           // first effect
+                fx_state     <= FX_IDLE;
+            end
+
+            // frame_count goes up on this same edge, so FX_CHECK two clocks
+            // from now compares against the NEW frame -- same as the notes.
+            FX_IDLE: if (frame_tick) fx_state <= FX_WAIT;
+
+            FX_WAIT: fx_state <= FX_CHECK;
+
+            FX_CHECK: begin
+                // "<=" not "==", like the notes, so a late check never skips
+                // an effect. effectAddr <= effect_count stops us running past
+                // the last effect into the empty (all-zero) part of the ROM.
+                if (effectAddr <= effect_count &&
+                    effect_rom_data[14:0] <= frame_count) begin
+                    effect_fire <= 1'b1;               // TODO: act on this
+                    effect_word <= effect_rom_data;
+                    effectAddr  <= effectAddr + 1'b1;
+                    fx_state    <= FX_WAIT;            // another one this frame?
+                end
+                else fx_state <= FX_IDLE;
+            end
+
+            default: fx_state <= FX_IDLE;
             endcase
         end
     end
