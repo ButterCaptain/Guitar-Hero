@@ -1,0 +1,1276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chart and Drum Effects Editor</title>
+<style>
+:root{
+  --bg:#14161c; --panel:#1d2029; --line:#2d3140; --text:#d9dce6; --dim:#8a90a3; --accent:#e8b84a; --fx:#c792ea;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Trebuchet MS","Segoe UI",sans-serif}
+header{padding:14px 18px 6px}
+h1{margin:0;font-size:18px;font-weight:700;letter-spacing:.2px}
+p.sub{margin:2px 0 0;color:var(--dim);font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 18px;background:var(--panel);border-block:1px solid var(--line)}
+.bar.fx{border-left:4px solid var(--fx)}
+.grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tag{font-size:12px;font-weight:700;color:var(--fx);text-transform:uppercase;letter-spacing:.6px}
+label{color:var(--dim);font-size:13px}
+button,select,input{font:inherit;color:var(--text);background:#262a37;border:1px solid var(--line);border-radius:6px;padding:5px 10px}
+button{cursor:pointer}
+button:hover{border-color:#4a5068}
+button.on{background:var(--accent);border-color:var(--accent);color:#1a1405;font-weight:700}
+button.go{background:#2c6e49;border-color:#3d8f61}
+button.fxgo{background:#5b3f7a;border-color:#7d58a6}
+#midiPanel{margin:12px 18px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+#midiPanel[hidden],#drumPanel[hidden]{display:none}
+#drumPanel{margin:12px 18px;padding:14px;border:1px solid #5b3f7a;border-radius:8px;background:var(--panel)}
+.drumRow{display:grid;grid-template-columns:44px 14px minmax(150px,1fr) 60px 100px 100px 90px;gap:8px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--line)}
+.drumRow:last-child{border-bottom:0}
+.drumHead{color:var(--dim);font-size:12px}
+#drumTable{overflow-x:auto;max-height:420px;overflow-y:auto}
+.drumRow{min-width:620px}
+.drumRow input[type=number]{width:84px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.midiGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:10px 0}
+.midiBox{border:1px solid var(--line);border-radius:6px;padding:10px;min-width:0}
+.midiBox h3{font-size:14px;margin:0 0 8px}
+#midiPitchMap{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}
+.pitchRow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px;background:#151821;border-radius:4px}
+.pitchRow select{max-width:105px}
+#midiEvents{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:5px}
+#midiRoll{display:block;width:100%;height:260px;border:1px solid var(--line);border-radius:5px;background:#11141b;cursor:crosshair}
+.midiEvent{display:grid;grid-template-columns:80px minmax(100px,1fr) 90px;gap:8px;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+.midiEvent:hover,.midiEvent.selected{background:#303548}
+.midiEvent:last-child{border-bottom:0}
+.laneChecks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.laneChecks label{display:flex;align-items:center;gap:3px}
+input[type=number]{width:84px}
+input[type=range]{padding:0;width:120px;accent-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#scroller{overflow-x:auto;overflow-y:hidden;margin:14px 18px 0;border:1px solid var(--line);border-radius:8px;background:#101218}
+#inner{position:relative;height:100%}
+canvas{position:sticky;left:0;top:0;display:block;cursor:crosshair}
+#status{margin:10px 18px 0;color:var(--dim);font-size:13px;min-height:20px}
+#counts{margin:4px 18px 0;color:var(--text);font-size:13px}
+.hint{margin:10px 18px 24px;color:var(--dim);font-size:13px;max-width:90ch}
+.hint b{color:var(--text)}
+.dim{color:var(--dim);font-size:13px}
+#tov{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;background:#0a0b0f}
+#tov[hidden]{display:none}
+#twrap{position:relative;flex:1;min-height:0}
+#tc{position:absolute;inset:0;cursor:default}
+#tbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 18px;background:var(--panel);border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Chart and effect editor (with drums)</h1>
+  <p class="sub">Five note lanes, the MIDI drum pattern and an effects row on one timeline. Exports <b>notes.hex</b> and <b>effects.hex</b> for the DE2-115 build.</p>
+</header>
+
+<div class="bar">
+  <div class="grp" role="group" aria-label="Tool">
+    <button id="t-tap" class="on" data-tool="tap">Tap (1)</button>
+    <button id="t-hold" data-tool="hold">Hold (2)</button>
+    <button id="t-erase" data-tool="erase">Erase (3)</button>
+  </div>
+  <div class="grp"><label for="len">Length (frames)</label><input id="len" type="number" min="100" max="32767" value="3600"></div>
+  <div class="grp"><label for="zoom">Zoom</label><input id="zoom" type="range" min="0.2" max="12" step="0.1" value="2"></div>
+  <div class="grp">
+    <button id="importNotes">Import notes.hex</button>
+    <button id="exportNotes" class="go">Export notes.hex</button>
+    <button id="midiToggle">Import MIDI / Map</button>
+    <button id="clearNotes">Clear notes</button>
+    <input id="notesFile" type="file" accept=".hex,.txt" hidden>
+    <input id="midiFile" type="file" accept=".mid,.midi" hidden>
+  </div>
+</div>
+
+<div class="bar fx">
+  <span class="tag">Effects</span>
+  <div class="grp"><label for="fxval" title="The number stored in bits 31..15 of the effect word. 0 = flash.">Effect value</label><input id="fxval" type="number" min="0" max="131071" value="0"><span id="fxname" class="dim">flash</span></div>
+  <div class="grp"><button id="fxHere" title="Add an effect at the playhead. Works while the song plays.">Add at playhead (E)</button><label><input type="checkbox" id="fxsnap"> Snap E to grid</label></div>
+  <div class="grp">
+    <button id="importFx">Import effects.hex</button>
+    <button id="exportFx" class="fxgo">Export effects.hex</button>
+    <button id="clearFx">Clear effects</button>
+    <input id="fxFile" type="file" accept=".hex,.txt" hidden>
+  </div>
+  <div class="grp"><label title="A note's frame in notes.hex is when it appears at the top of the highway; it reaches the hit line 127 frames later, but an effect fires on its own frame. Ticking this adds 127 to every frame in effects.hex (and takes it off again on import), so an effect placed on a note here flashes when that note is hit on the board."><input type="checkbox" id="fxoff" checked> Add +127 frames on export (note travel time)</label></div>
+  <div class="grp"><label for="fxnames" title="Names for effect values, shown in the editor only. Format: value=name, comma separated. The board only acts on value 0 (flash) today.">Value names</label><input id="fxnames" type="text" style="width:220px" value="0=flash, 1=small flash"></div>
+  <div class="grp"><button id="drumToggle" class="fxgo">Drums &rarr; effects</button></div>
+</div>
+
+<section id="drumPanel" hidden>
+  <h2 style="margin:0;font-size:17px">Drums &rarr; effects</h2>
+  <p class="dim">Load the song's MIDI and pick its drum track. Each drum sound gets its own thin row on the timeline (under lane 5), so you can see the drum pattern against the waveform and notes. Brighter ticks are louder hits. <b>Click a drum hit</b> on the timeline to turn just that hit into an effect (it uses the sound's value below if set, otherwise the Effect value box). Or set rules here and add effects for a whole section at once.</p>
+  <div class="midiGrid">
+    <div class="midiBox">
+      <h3>Source</h3>
+      <div class="grp"><button id="drumChoose" class="go">Choose MIDI file</button><span id="drumName" class="dim">No MIDI loaded</span></div>
+      <div class="grp" style="margin-top:8px"><label for="drumTrack">Drum track</label><select id="drumTrack" style="max-width:100%;flex:1"></select></div>
+      <div class="grp" style="margin-top:8px"><label for="drumSpeed">MIDI speed (%)</label><input id="drumSpeed" type="number" min="10" max="400" step="any" value="100.462"><span class="dim">shared with the note MIDI import</span></div>
+      <div id="drumInfo" class="dim" style="margin-top:8px">Choose a MIDI file to begin.</div>
+    </div>
+    <div class="midiBox">
+      <h3>Add effects from rules</h3>
+      <p class="dim" style="margin-top:0">Uses every drum sound below that has a value. Hits are counted per sound, so "every 2nd" means every other snare, not every other drum hit.</p>
+      <div class="grp"><label for="ruleFrom">From (s)</label><input id="ruleFrom" type="number" min="0" step="0.1" value="0"><label for="ruleTo">to (s)</label><input id="ruleTo" type="number" min="0" step="0.1" value="9999"><button id="ruleFromPlayhead" title="Set From to the playhead">From = playhead</button></div>
+      <div class="grp" style="margin-top:8px"><button id="rulePreview">Preview</button><button id="ruleApply" class="fxgo">Add effects</button><button id="ruleClear" title="Remove every effect between From and To">Remove effects in range</button></div>
+      <div id="ruleStatus" class="dim" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="midiBox">
+    <h3>Drum sounds</h3>
+    <div id="drumTable" class="dim">Load a MIDI file to list its drum sounds.</div>
+    <input id="drumFile" type="file" accept=".mid,.midi" hidden>
+  </div>
+</section>
+
+<section id="midiPanel" hidden>
+  <h2 style="margin:0;font-size:17px">MIDI to five-lane chart</h2>
+  <p class="dim">Import a .mid file. Guitar Hero-style tracks can be extracted by difficulty. For ordinary MIDI, map pitches to lanes globally, add time-range overrides, or assign a lane combination to a specific note/chord.</p>
+  <div class="midiGrid">
+    <div class="midiBox">
+      <h3>Source</h3>
+      <div class="grp"><button id="midiChoose" class="go">Choose MIDI file</button><span id="midiName" class="dim">No MIDI loaded</span></div>
+      <div class="grp" style="margin-top:8px"><label for="midiTrack">Track</label><select id="midiTrack" style="max-width:100%;flex:1"></select></div>
+      <div class="grp" style="margin-top:8px"><label for="midiMode">Mapping mode</label><select id="midiMode"><option value="auto">Guitar Hero chart (by difficulty)</option><option value="generic">General MIDI (custom mapping)</option></select></div>
+      <div class="grp" style="margin-top:8px"><label for="midiDifficulty">Difficulty</label><select id="midiDifficulty"><option value="60">Easy</option><option value="72" selected>Medium</option><option value="84">Hard</option><option value="96">Expert</option></select></div>
+      <div class="grp" style="margin-top:8px"><label for="midiSpeed">MIDI speed (%)</label><input id="midiSpeed" type="number" min="10" max="400" step="any" value="100.462"><span class="dim">100% = normal; 200% = 2× faster; 50% = half speed</span></div>
+      <div id="midiInfo" class="dim" style="margin-top:8px">Choose a MIDI file to begin.</div>
+    </div>
+    <div class="midiBox">
+      <h3>Range rule</h3>
+      <div class="grp"><label for="rangePitch">MIDI pitch</label><select id="rangePitch"></select></div>
+      <div class="grp" style="margin-top:7px"><label for="rangeLane">Map to lane</label><select id="rangeLane"><option value="-1">Ignore</option><option value="0">Lane 1</option><option value="1">Lane 2</option><option value="2">Lane 3</option><option value="3">Lane 4</option><option value="4">Lane 5</option></select></div>
+      <div class="grp" style="margin-top:7px"><label for="rangeStart">Start (sec)</label><input id="rangeStart" type="number" min="0" step="0.1" value="0"></div>
+      <div class="grp" style="margin-top:7px"><label for="rangeEnd">End (sec)</label><input id="rangeEnd" type="number" min="0" step="0.1" value="30"></div>
+      <button id="addRangeRule" style="margin-top:8px">Add range override</button>
+      <div id="rangeRules" class="dim" style="margin-top:8px">No range overrides.</div>
+    </div>
+  </div>
+  <div class="midiBox" style="margin-bottom:12px">
+    <h3>Global MIDI pitch mapping</h3>
+    <p class="dim">Each pitch can map to one lane or be ignored. These rules apply to every occurrence unless a range rule or event-specific override takes priority.</p>
+    <div id="midiPitchMap">Load a MIDI file to list pitches.</div>
+  </div>
+  <div class="midiBox" style="margin-bottom:12px">
+    <h3>Note/chord preview and manual override</h3>
+    <p class="dim">Select a timestamp group below. Assign a lane combination and apply it to this occurrence, or apply it to every occurrence of the same exact chord pitch pattern.</p>
+    <div class="grp" style="margin:8px 0"><label for="midiViewStart">Piano roll start (sec)</label><input id="midiViewStart" type="number" min="0" step="5" value="0"><button id="midiRollRefresh">Show 30 seconds</button></div>
+    <canvas id="midiRoll" width="1200" height="260" aria-label="MIDI piano roll; click a note or chord to select it"></canvas>
+    <div id="midiEvents" style="margin-top:8px">Load a MIDI file to preview events.</div>
+    <div id="selectedEventInfo" class="dim" style="margin-top:8px">No event selected.</div>
+    <div class="laneChecks"><label><input type="checkbox" class="manualLane" value="0"> 1</label><label><input type="checkbox" class="manualLane" value="1"> 2</label><label><input type="checkbox" class="manualLane" value="2"> 3</label><label><input type="checkbox" class="manualLane" value="3"> 4</label><label><input type="checkbox" class="manualLane" value="4"> 5</label></div>
+    <div class="grp"><button id="applyOccurrence">Apply to this occurrence</button><button id="applyChordGlobal">Apply to this chord pattern everywhere</button><button id="clearMidiOverrides">Clear manual overrides</button></div>
+  </div>
+  <div class="grp"><button id="previewMapping">Preview mapping</button><button id="commitMapping" class="go">Import mapped notes into editor</button><span id="mappingStatus" class="dim"></span></div>
+</section>
+
+<div class="bar">
+  <div class="grp"><label for="audio">Audio</label><input id="audio" type="file" accept="audio/*,.mp3,.wav"><span id="aname" class="dim">None loaded</span></div>
+  <div class="grp"><label for="fps" title="The board runs at 25 MHz / (800 x 525) = 59.5238 frames per second.">Frame rate</label><input id="fps" type="number" min="1" max="240" step="any" value="59.5238"></div>
+  <div class="grp"><label for="off" title="Positive moves the audio later, negative earlier. Notes, effects and the beat grid stay put. You can also drag the waveform.">Audio shift (ms)</label><button id="nl" title="Earlier by 10 ms (Shift: 1 ms)">&#9664;</button><input id="off" type="number" step="1" value="0"><button id="nr" title="Later by 10 ms (Shift: 1 ms)">&#9654;</button></div>
+  <div class="grp"><button id="play">Play (Space)</button><button id="rew">Rewind (Home)</button><span id="tdisp" class="dim">Playhead: frame 0 (0.000 s)</span></div>
+  <div class="grp"><button id="testbtn" class="go">Test run</button></div>
+</div>
+
+<div class="bar">
+  <div class="grp"><label for="bpm">Tempo (BPM)</label><input id="bpm" type="number" min="20" max="400" step="0.01" value="120"></div>
+  <div class="grp"><label for="sign">Time signature</label><input id="sign" type="number" min="1" max="32" value="4" style="width:60px"><span class="dim">/</span><select id="sigd"><option>2</option><option selected>4</option><option>8</option><option>16</option></select></div>
+  <div class="grp"><label for="sstart" title="Frame where bar 1, beat 1 sits. Shifting the audio never changes it.">Song start frame</label><input id="sstart" type="number" value="0"><button id="sset">Set to playhead</button></div>
+  <div class="grp"><label for="snapnote">Snap to</label>
+    <select id="snapnote">
+      <option value="0">Off (single frames)</option>
+      <option value="1">Whole note</option>
+      <option value="2">Half note</option>
+      <option value="3">Third (half-note triplet)</option>
+      <option value="4">Quarter note</option>
+      <option value="6">Sixth (quarter-note triplet)</option>
+      <option value="8">Eighth note</option>
+      <option value="12">Twelfth (eighth-note triplet)</option>
+      <option value="16" selected>Sixteenth note</option>
+      <option value="24">Twenty-fourth (sixteenth triplet)</option>
+      <option value="32">Thirty-second note</option>
+      <option value="48">Forty-eighth</option>
+      <option value="64">Sixty-fourth note</option>
+    </select>
+  </div>
+  <div class="grp"><label><input type="checkbox" id="grid" checked> Show beat grid</label></div>
+</div>
+
+<div id="scroller"><div id="inner"><canvas id="cv"></canvas></div></div>
+<div id="status">Hover over a lane or the effects row.</div>
+<div id="counts"></div>
+<div class="hint">
+  <p><b>Notes:</b> click an empty spot in a lane to place a note with the selected tool. Clicking an existing note applies the tool to it (Tap or Hold changes its type, Erase removes it). Right-click always removes. A hold extends to the next event in its lane.</p>
+  <p><b>Effects:</b> click the purple <b>Effects</b> row to add an effect with the current <b>Effect value</b> (0 = flash). Click an effect to select it, then change the value box to edit it. Right-click (or the Erase tool) removes it. While the song plays, press <b>E</b> to drop an effect exactly where you hear something; the faint line it draws through the lanes shows which notes it lines up with. <b>Test run</b> plays the chart with the flashes, so you can check them against the music.</p>
+  <p><b>Drums:</b> open <b>Drums &rarr; effects</b>, choose the song's MIDI, and check the drum track. Each drum sound gets a thin row under lane 5; brighter ticks are louder hits, and a white box marks a hit that already has an effect. <b>Click a hit</b> to make just that one an effect (right-click removes it). To do a whole section, give some sounds a <b>Value</b> (blank = never), optionally a <b>Min velocity</b> so only accents count and <b>Every Nth</b> to thin them out, set <b>From/To</b>, then <b>Preview</b> and <b>Add effects</b>. Untick <b>Show</b> to hide sounds you don't care about. Effects you add from drums are ordinary effects: edit or delete them like any other.</p>
+  <p><b>Files:</b> notes.hex is the 10-word header (note count, then start address, of each lane) followed by every lane's notes; each word is bit 15 = hold, bits 14..0 = frame. effects.hex is word 0 = number of effects, then one 32-bit word per effect sorted by frame: bits 14..0 = frame, bits 31..15 = effect value. Both memories hold at most 2048 words. Frames are 15 bits, so a chart can span at most 32767 frames (about 9:10 at 59.5238 fps).</p>
+  <p>Click the ruler or waveform to move the playhead; drag the waveform or use the arrows to shift the audio. Tempo, time signature and the beat grid only help with placement and are not exported.</p>
+</div>
+
+<div id="tov" hidden>
+  <div id="twrap"><canvas id="tc"></canvas></div>
+  <div id="tbar">
+    <label><input type="checkbox" id="auto"> Auto-play</label>
+    <label>Scroll speed <input type="range" id="tspeed" min="2" max="16" step="0.5" value="6"></label>
+    <button id="trestart">Restart</button>
+    <button id="tclose">Close (Esc)</button>
+    <span class="dim">Keys: D F Space J K</span>
+  </div>
+</div>
+
+<script>
+const LANES = 5, MAXF = 0x7FFF, HDR = 2 * LANES, PAD = 64, RULER = 72, RH = 28, WAVE = 44, LH = 64, FXH = 56;
+const HEAD = 18, NH = 38, BH = 10, DEFAULT_HOLD = 8;
+const MEM_WORDS = 2048;              // note_rom: ADDR_W = 11 for both memories
+const FX_MAXV = 0x1FFFF;             // bits 31..15 of an effect word
+const NOTE_TRAVEL = 127;             // frames from appearing at the top to the hit line
+const FLASH_FRAMES = 8;              // matches highway_draw's flashTimer
+const COLORS = ['#ff5d73', '#ffb347', '#7bdc65', '#4fc3f7', '#b388ff'];
+const DRH = 16;                      // height of one drum-sound row
+const DRUM_ROW = RULER + LANES * LH; // top of the drum rows (right under lane 5)
+let FX_NAMES = {0: 'flash', 1: 'small flash'};
+let FX_ROW = DRUM_ROW;               // top of the effects row (moves down when drum rows show)
+let H = FX_ROW + FXH;
+
+let lanes = Array.from({length: LANES}, () => []);   // sorted [{f, h, end?}]
+let effects = [];                                     // sorted [{f, v}]
+let selFx = null;
+let tool = 'tap', ppf = 2, minLen = 3600, hover = null;
+
+// Drum state. sounds: one per MIDI pitch in the drum track
+//   {pitch, name, color, show, value ('' = none), minVel, every, hits: [{f, vel}]}
+const DRUMS = {track: null, sounds: []};
+const shownSounds = () => DRUMS.sounds.filter(s => s.show);
+
+const $ = id => document.getElementById(id);
+const scroller = $('scroller'), inner = $('inner'), cv = $('cv'), ctx = cv.getContext('2d');
+
+function recalcRows() {
+  FX_ROW = DRUM_ROW + shownSounds().length * DRH + (shownSounds().length ? 4 : 0);
+  H = FX_ROW + FXH;
+}
+
+const fxName = v => FX_NAMES[v] ?? 'effect ' + v;
+const fxColor = v => v === 0 ? '#ffffff' : `hsl(${(v * 47) % 360} 70% 70%)`;
+
+function viewLen() {
+  let m = 0;
+  lanes.forEach(l => l.length && (m = Math.max(m, l[l.length - 1].f)));
+  if (effects.length) m = Math.max(m, effects[effects.length - 1].f);
+  if (buf) m = Math.max(m, Math.ceil((buf.duration - offset) * fps));
+  return Math.min(Math.max(minLen, m + 120), MAXF + 100);
+}
+
+function layout() {
+  recalcRows();
+  const w = PAD + viewLen() * ppf + 80;
+  inner.style.width = w + 'px';
+  inner.style.height = H + 'px';
+  scroller.style.height = (H + 18) + 'px';
+  const dpr = window.devicePixelRatio || 1, cw = scroller.clientWidth;
+  cv.width = cw * dpr; cv.height = H * dpr;
+  cv.style.width = cw + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function draw() {
+  const w = cv.clientWidth, sx = scroller.scrollLeft;
+  ctx.clearRect(0, 0, w, H);
+  ctx.fillStyle = '#101218'; ctx.fillRect(0, 0, w, H);
+
+  drawWave(w, sx);
+  for (let l = 0; l < LANES; l++) {
+    ctx.fillStyle = l % 2 ? '#14171f' : '#171a23';
+    ctx.fillRect(0, RULER + l * LH, w, LH);
+  }
+  ctx.fillStyle = '#1b1624'; ctx.fillRect(0, FX_ROW, w, FXH);
+
+  const f0 = Math.max(0, Math.floor((sx - PAD) / ppf)), f1 = Math.ceil((sx + w - PAD) / ppf);
+  const X = f => PAD + f * ppf - sx;
+
+  // minor grid
+  const ss = snapStep(), so = snapOrigin();
+  if (ss && ss * ppf >= 5) {
+    ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let j = Math.ceil((f0 - so) / ss); so + j * ss <= f1; j++) {
+      const x = Math.round(X(Math.round(so + j * ss))) + .5; ctx.moveTo(x, RULER); ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+  }
+  // ruler + major grid
+  const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000].find(s => s * ppf >= 70) || 2000;
+  ctx.fillStyle = '#1d2029'; ctx.fillRect(0, 0, w, RH);
+  ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.fillStyle = '#8a90a3'; ctx.beginPath();
+  for (let f = Math.ceil(f0 / step) * step; f <= f1; f += step) {
+    const x = Math.round(X(f)) + .5;
+    ctx.moveTo(x, RH - 8); ctx.lineTo(x, $('grid').checked ? RH : H);
+    ctx.fillText(f + '  ' + fmtTime(f / fps), x + 4, 8);
+  }
+  ctx.stroke();
+  drawBeats(f0, f1, X);
+  // row dividers
+  ctx.strokeStyle = '#2d3140'; ctx.beginPath();
+  for (let l = 0; l <= LANES; l++) { const y = RULER + l * LH + .5; ctx.moveTo(0, y); ctx.lineTo(w, y); }
+  ctx.stroke();
+  ctx.strokeStyle = '#5b3f7a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, FX_ROW + 1); ctx.lineTo(w, FX_ROW + 1); ctx.stroke(); ctx.lineWidth = 1;
+
+  // effect guide lines, behind the notes so you can see what they line up with
+  for (const e of effects) {
+    const x = X(e.f); if (x < -10 || x > w + 10) continue;
+    ctx.strokeStyle = fxColor(e.v); ctx.globalAlpha = e === selFx ? .55 : .22; ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, RH); ctx.lineTo(Math.round(x) + .5, FX_ROW); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+
+  // notes
+  for (let l = 0; l < LANES; l++) {
+    const cy = RULER + l * LH + LH / 2, col = COLORS[l], arr = lanes[l];
+    arr.forEach((n, i) => {
+      if (n.end) return; // non-playable hold-end marker
+      const x = X(n.f);
+      if (x < -HEAD - 4 && (!arr[i + 1] || X(arr[i + 1].f) < -HEAD)) return;
+      if (x > w + HEAD) return;
+      if (n.h) {
+        const next = arr[i + 1], endX = next ? X(next.f) : X(n.f + DEFAULT_HOLD);
+        ctx.globalAlpha = next ? .85 : .4;
+        ctx.fillStyle = col;
+        ctx.fillRect(x, cy - BH / 2, Math.max(0, endX - x), BH);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = col;
+      rr(x - HEAD / 2, cy - NH / 2, HEAD, NH, 4); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (n.h) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x - 3, cy - 3, 6, 6); }
+    });
+  }
+
+  // drum rows: one thin row per shown drum sound, ticks brighter for louder hits
+  const shown = shownSounds();
+  const fxFrames = new Set(effects.map(e => e.f));
+  shown.forEach((s, r) => {
+    const y = DRUM_ROW + r * DRH;
+    ctx.fillStyle = r % 2 ? '#12141b' : '#15171f'; ctx.fillRect(0, y, w, DRH);
+    for (const hHit of s.hits) {
+      const x = X(hHit.f); if (x < -4) continue; if (x > w + 4) break;
+      const used = fxFrames.has(hHit.f);
+      ctx.globalAlpha = 0.35 + 0.65 * hHit.vel / 127;
+      ctx.fillStyle = s.color; ctx.fillRect(Math.round(x) - 2, y + 3, 4, DRH - 6);
+      if (used) { ctx.globalAlpha = 1; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.strokeRect(Math.round(x) - 3.5, y + 1.5, 7, DRH - 3); ctx.lineWidth = 1; }
+      ctx.globalAlpha = 1;
+    }
+  });
+  if (hover && hover.drum && hover.hit) {
+    const y = DRUM_ROW + hover.drum.row * DRH, x = X(hover.hit.f);
+    ctx.strokeStyle = '#e8b84a'; ctx.lineWidth = 2; ctx.strokeRect(Math.round(x) - 4, y + 1, 8, DRH - 2); ctx.lineWidth = 1;
+  }
+
+  // effects row
+  const ecy = FX_ROW + FXH / 2;
+  ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+  for (const e of effects) {
+    const x = X(e.f); if (x < -60 || x > w + 12) continue;
+    const s = e.v === 0 ? 11 : 8;      // smaller diamond for anything that isn't the big flash
+    ctx.fillStyle = fxColor(e.v);
+    ctx.beginPath(); ctx.moveTo(x, ecy - s); ctx.lineTo(x + s, ecy); ctx.lineTo(x, ecy + s); ctx.lineTo(x - s, ecy); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = e === selFx ? '#e8b84a' : 'rgba(0,0,0,.6)'; ctx.lineWidth = e === selFx ? 3 : 1.5; ctx.stroke(); ctx.lineWidth = 1;
+    if (ppf >= 1.5) { ctx.fillStyle = '#d9dce6'; ctx.fillText(fxName(e.v), x + s + 4, ecy); }
+  }
+
+  // ghost
+  if (hover && !hover.drum && tool !== 'erase') {
+    const x = X(hover.f);
+    ctx.globalAlpha = .4;
+    if (hover.lane === LANES) {
+      const v = fxValue(), s = 11;
+      ctx.fillStyle = fxColor(v);
+      ctx.beginPath(); ctx.moveTo(x, ecy - s); ctx.lineTo(x + s, ecy); ctx.lineTo(x, ecy + s); ctx.lineTo(x - s, ecy); ctx.closePath(); ctx.fill();
+    } else {
+      const cy = RULER + hover.lane * LH + LH / 2;
+      ctx.fillStyle = COLORS[hover.lane];
+      rr(x - HEAD / 2, cy - NH / 2, HEAD, NH, 4); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // playhead
+  const px = X(curFrame());
+  if (px >= 0 && px <= w) {
+    ctx.strokeStyle = '#ff4d4d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); ctx.lineWidth = 1;
+  }
+  // row labels
+  ctx.font = '12px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+  for (let l = 0; l < LANES; l++) {
+    const y = RULER + l * LH + LH / 2;
+    ctx.fillStyle = 'rgba(16,18,24,.88)'; ctx.fillRect(0, y - 11, 52, 22);
+    ctx.fillStyle = COLORS[l]; ctx.fillText('Lane ' + (l + 1), 6, y);
+  }
+  ctx.font = '10px "Trebuchet MS",sans-serif';
+  shown.forEach((s, r) => {
+    const y = DRUM_ROW + r * DRH + DRH / 2, label = s.name.length > 14 ? s.name.slice(0, 13) + '…' : s.name;
+    ctx.fillStyle = 'rgba(16,18,24,.88)'; ctx.fillRect(0, y - 7, 78, 14);
+    ctx.fillStyle = s.color; ctx.fillText(label, 4, y);
+  });
+  ctx.font = '12px "Trebuchet MS",sans-serif';
+  ctx.fillStyle = 'rgba(16,18,24,.88)'; ctx.fillRect(0, ecy - 11, 56, 22);
+  ctx.fillStyle = '#c792ea'; ctx.fillText('Effects', 6, ecy);
+}
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function fmtTime(s) {
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return `${m}:${r.toFixed(1).padStart(4, '0')}`;
+}
+
+// ---------- editing ----------
+function pos(e) {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  let lane = y >= FX_ROW ? LANES : Math.floor((y - RULER) / LH), drum = null;
+  if (y >= DRUM_ROW && y < FX_ROW) {
+    const row = Math.floor((y - DRUM_ROW) / DRH), s = shownSounds()[row];
+    lane = -1;
+    if (s) drum = {row, sound: s};
+  }
+  const f = snapFrame((x + scroller.scrollLeft - PAD) / ppf);
+  return {x, y, lane, f, drum};
+}
+function hitDrum(sound, x) {
+  const wx = x + scroller.scrollLeft - PAD;
+  let best = null, bd = 6;
+  for (const h of sound.hits) { const d = Math.abs(h.f * ppf - wx); if (d <= bd) { bd = d; best = h; } }
+  return best;
+}
+const drumValue = s => s.value === '' ? fxValue() : Math.max(0, Math.min(FX_MAXV, Math.round(+s.value)));
+function hit(lane, x) {
+  const wx = x + scroller.scrollLeft - PAD;
+  let best = null, bd = HEAD / 2 + 2;
+  lanes[lane].forEach(n => { if (n.end) return; const d = Math.abs(n.f * ppf - wx); if (d <= bd) { bd = d; best = n; } });
+  return best;
+}
+function hitEffect(x) {
+  const wx = x + scroller.scrollLeft - PAD;
+  let best = null, bd = 13;
+  effects.forEach(e => { const d = Math.abs(e.f * ppf - wx); if (d <= bd) { bd = d; best = e; } });
+  return best;
+}
+function noteWords() { return HDR + lanes.reduce((t, l) => t + l.length, 0); }
+function addNote(lane, f, h) {
+  const arr = lanes[lane];
+  if (noteWords() + 1 > MEM_WORDS) { alert(`notes.hex is full: the header plus all notes may use at most ${MEM_WORDS} words (the board's note memory size).`); return; }
+  const i = arr.findIndex(n => n.f >= f && !n.end);
+  if (i >= 0 && arr[i].f === f) { arr[i].h = h; return; }
+  let at = arr.findIndex(n => n.f > f); if (at < 0) at = arr.length;
+  arr.splice(at, 0, {f, h});
+}
+function fxValue() { return Math.max(0, Math.min(FX_MAXV, Math.round(+$('fxval').value || 0))); }
+function addEffect(f, v) {
+  f = Math.max(0, Math.min(MAXF - ($('fxoff').checked ? NOTE_TRAVEL : 0), Math.round(f)));
+  const same = effects.find(e => e.f === f);
+  if (same) { same.v = v; selFx = same; return same; }
+  if (effects.length + 1 > MEM_WORDS - 1) { alert(`effects.hex is full: at most ${MEM_WORDS - 1} effects.`); return null; }
+  const e = {f, v};
+  let at = effects.findIndex(x => x.f > f); if (at < 0) at = effects.length;
+  effects.splice(at, 0, e);
+  selFx = e;
+  return e;
+}
+
+cv.addEventListener('mousemove', e => {
+  const p = pos(e);
+  if (p.drum) {
+    const h = hitDrum(p.drum.sound, p.x), s = p.drum.sound;
+    hover = {drum: p.drum, hit: h, f: p.f};
+    const fx = h && effects.find(x => x.f === h.f);
+    $('status').textContent = h
+      ? `${s.name} (MIDI ${s.pitch}), velocity ${h.vel}, frame ${h.f} (${(h.f / fps).toFixed(3)} s) - ` +
+        (fx ? `already has "${fxName(fx.v)}": click to select it, right-click to remove it`
+            : `click to add "${fxName(drumValue(s))}" here`)
+      : `${s.name} (MIDI ${s.pitch}) - ${s.hits.length} hits`;
+    draw(); return;
+  }
+  hover = p.lane >= 0 && p.lane <= LANES && p.y >= RULER ? {lane: p.lane, f: p.f} : null;
+  if (!hover) $('status').textContent = '';
+  else if (hover.lane === LANES) {
+    const ex = hitEffect(p.x);
+    $('status').textContent = ex
+      ? `Effect "${fxName(ex.v)}" (value ${ex.v}) at frame ${ex.f}, ${(ex.f / fps).toFixed(3)} s - click to select, right-click to remove`
+      : `Effects row, frame ${hover.f} (${(hover.f / fps).toFixed(3)} s) - click to add "${fxName(fxValue())}"`;
+  }
+  else $('status').textContent = `Lane ${hover.lane + 1}, frame ${hover.f} (${(hover.f / fps).toFixed(3)} s)`;
+  draw();
+});
+cv.addEventListener('mouseleave', () => { hover = null; draw(); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => {
+  const p = pos(e);
+  if (e.button === 0 && p.y < RH) { seekAt(p.x); return; }
+  if (e.button === 0 && p.y < RULER) { wdrag = {x: p.x, s: shiftMs, moved: false}; return; }
+  if (p.y < RULER || p.y >= H) return;
+  if (p.y >= DRUM_ROW && p.y < FX_ROW) {
+    if (!p.drum) return;
+    const h = hitDrum(p.drum.sound, p.x); if (!h) return;
+    const fx = effects.find(x => x.f === h.f);
+    if (e.button === 2 || tool === 'erase') {
+      if (fx) { effects.splice(effects.indexOf(fx), 1); if (selFx === fx) selFx = null; }
+    } else if (fx) {
+      selFx = fx; $('fxval').value = fx.v; showFxName();
+    } else addEffect(h.f, drumValue(p.drum.sound));
+    update(); return;
+  }
+  if (p.lane === LANES) {
+    const ex = hitEffect(p.x);
+    if (e.button === 2 || tool === 'erase') {
+      if (ex) { effects.splice(effects.indexOf(ex), 1); if (selFx === ex) selFx = null; }
+    } else if (ex) {
+      selFx = ex; $('fxval').value = ex.v; showFxName();
+    } else addEffect(p.f, fxValue());
+    update(); return;
+  }
+  const n = hit(p.lane, p.x);
+  if (e.button === 2 || tool === 'erase') {
+    if (n) lanes[p.lane].splice(lanes[p.lane].indexOf(n), 1);
+  } else if (n) n.h = tool === 'hold';
+  else addNote(p.lane, p.f, tool === 'hold');
+  update();
+});
+
+function update() {
+  const ln = lanes.map((l, i) => `Lane ${i + 1}: ${l.filter(n => !n.end).length}`).join('   ');
+  const ends = lanes.reduce((t, l) => t + l.filter(n => n.end).length, 0);
+  $('counts').textContent = `${ln}   (${ends} hold-end markers, notes.hex ${noteWords()} / ${MEM_WORDS} words)      Effects: ${effects.length}`;
+  layout();
+}
+
+// ---------- controls ----------
+document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  draw();
+}
+function addEffectAtPlayhead() {
+  const raw = curFrame();
+  addEffect($('fxsnap').checked ? snapFrame(raw) : raw, fxValue());
+  update();
+}
+addEventListener('keydown', e => {
+  if (testing || /INPUT|SELECT/.test(e.target.tagName)) return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
+  if (e.code === 'Home') { seek(0); scroller.scrollLeft = 0; return; }
+  if (e.key === '1') setTool('tap'); if (e.key === '2') setTool('hold'); if (e.key === '3') setTool('erase');
+  if (e.key === 'e' || e.key === 'E') addEffectAtPlayhead();
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selFx) { effects.splice(effects.indexOf(selFx), 1); selFx = null; update(); }
+});
+$('len').onchange = e => { minLen = Math.max(100, Math.min(MAXF, +e.target.value || 3600)); layout(); };
+$('zoom').oninput = e => { ppf = +e.target.value; layout(); };
+scroller.addEventListener('scroll', draw);
+new ResizeObserver(layout).observe(scroller);
+$('clearNotes').onclick = () => { if (confirm('Remove all notes?')) { lanes = lanes.map(() => []); update(); } };
+$('clearFx').onclick = () => { if (confirm('Remove all effects?')) { effects = []; selFx = null; update(); } };
+function showFxName() { $('fxname').textContent = fxName(fxValue()); }
+$('fxval').oninput = () => {
+  showFxName();
+  if (selFx) { selFx.v = fxValue(); draw(); }
+};
+$('fxval').onchange = () => { $('fxval').value = fxValue(); showFxName(); };
+$('fxHere').onclick = addEffectAtPlayhead;
+
+// ---------- file helpers ----------
+const hex = (v, n) => (v >>> 0).toString(16).toUpperCase().padStart(n, '0');
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function readHexWords(text, digits) {
+  // $readmemh-style: whitespace separated hex words; // comments allowed.
+  const vals = text.replace(/\/\/.*$/gm, '').split(/[\s,]+/).filter(Boolean).map(t => t.replace(/^0x/i, ''));
+  const re = new RegExp(`^[0-9a-f]{1,${digits}}$`, 'i');
+  if (!vals.length || vals.some(v => !re.test(v))) return null;
+  return vals.map(v => parseInt(v, 16));
+}
+
+// ---------- notes.hex ----------
+//
+// One 16-bit word per line, line number = address (this is what note_rom loads):
+//   address 0 .. 4    note COUNT of lane 1 .. lane 5
+//   address 5 .. 9    START ADDRESS of lane 1 .. lane 5
+//   address 10 ..     lane 1 notes, then lane 2, ... lane 5, back to back
+// Note word: bit 15 = 1 for a held-note start, 0 for a tap or a hold-end marker;
+//            bits 14..0 = frame. The first 0-bit word after a hold is its end marker.
+const HOLD_BIT = 0x8000, FRAME_MASK = 0x7FFF;
+const enc = n => (n.h ? HOLD_BIT : 0) | (n.f & FRAME_MASK);
+const dec = w => ({f: w & FRAME_MASK, h: !!(w & HOLD_BIT)});
+function decodeLane(words) {
+  const out = []; let previousWasHold = false;
+  for (const w of words) { const n = dec(w); if (previousWasHold && !n.h) n.end = true; out.push(n); previousWasHold = !!n.h; }
+  return out;
+}
+function buildNotesHex() {
+  const counts = lanes.map(a => a.length), starts = [];
+  let addr = HDR;
+  counts.forEach(c => { starts.push(addr); addr += c; });
+  const words = new Array(addr).fill(0);
+  counts.forEach((c, l) => { words[l] = c; });
+  starts.forEach((s0, l) => { words[LANES + l] = s0; });
+  lanes.forEach((arr, l) => arr.forEach((n, i) => { words[starts[l] + i] = enc(n); }));
+  return words.map(w => hex(w, 4)).join('\n') + '\n';
+}
+$('exportNotes').onclick = () => {
+  if (noteWords() > MEM_WORDS) { alert(`Too many notes: ${noteWords()} words, the board holds ${MEM_WORDS}.`); return; }
+  download('notes.hex', buildNotesHex());
+};
+$('importNotes').onclick = () => $('notesFile').click();
+$('notesFile').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  const words = readHexWords(await file.text(), 4);
+  if (!words) { alert('Not a notes.hex file: expected one 16-bit hexadecimal word per line.'); return; }
+  const expected = []; let next = HDR;
+  words.slice(0, LANES).forEach(c => { expected.push(next); next += c; });
+  const ok = words.length >= next && words.slice(LANES, HDR).every((s0, l) => s0 === expected[l]);
+  if (!ok) {
+    alert('This does not look like a notes.hex file: the 10-word header (lane counts and start addresses) does not match. If this is effects.hex, use "Import effects.hex".');
+    return;
+  }
+  lanes = lanes.map((_, l) => decodeLane(words.slice(words[LANES + l], words[LANES + l] + words[l])));
+  update();
+};
+
+// ---------- effects.hex ----------
+//
+// One 32-bit word per line (note_rom's second memory, read by note_feeder):
+//   word 0        number of effects N
+//   words 1 .. N  one effect each, sorted by frame:
+//                   bits 14..0  frame the effect fires on
+//                   bits 31..15 effect value (0 = flash)
+function buildEffectsHex() {
+  const add = $('fxoff').checked ? NOTE_TRAVEL : 0;
+  const sorted = [...effects].sort((a, b) => a.f - b.f);
+  const words = [sorted.length, ...sorted.map(e => (((e.v & FX_MAXV) << 15) | ((e.f + add) & FRAME_MASK)) >>> 0)];
+  return words.map(w => hex(w, 8)).join('\n') + '\n';
+}
+$('exportFx').onclick = () => {
+  const add = $('fxoff').checked ? NOTE_TRAVEL : 0;
+  const late = effects.filter(e => e.f + add > MAXF);
+  if (late.length) { alert(`${late.length} effect(s) would land past frame ${MAXF} after adding ${add}. Move them earlier first.`); return; }
+  download('effects.hex', buildEffectsHex());
+};
+$('importFx').onclick = () => $('fxFile').click();
+$('fxFile').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  const words = readHexWords(await file.text(), 8);
+  if (!words) { alert('Not an effects.hex file: expected one hexadecimal word (up to 8 digits) per line.'); return; }
+  const n = words[0];
+  if (words.length < n + 1) { alert(`effects.hex says it has ${n} effects but only ${words.length - 1} follow.`); return; }
+  const sub = $('fxoff').checked ? NOTE_TRAVEL : 0;
+  effects = [];
+  for (let i = 1; i <= n; i++) {
+    const w = words[i] >>> 0;
+    effects.push({f: Math.max(0, (w & FRAME_MASK) - sub), v: (w >>> 15) & FX_MAXV});
+  }
+  effects.sort((a, b) => a.f - b.f);
+  selFx = null;
+  update();
+};
+
+// ---------- MIDI import and mapping ----------
+const MIDI = {tracks:[], originalTracks:[], division:480, tempo:[], notes:[], groups:[], globalMap:new Map(), rangeRules:[], occurrenceOverrides:new Map(), chordRules:new Map(), selectedGroup:null, name:''};
+$('midiToggle').onclick = () => { $('midiPanel').hidden = !$('midiPanel').hidden; };
+$('midiChoose').onclick = () => $('midiFile').click();
+$('midiFile').onchange = async e => {
+  const file=e.target.files[0]; e.target.value=''; if(!file) return;
+  try { await loadMidi(await file.arrayBuffer(), file.name); afterMidiLoaded(); } catch(err) { console.error(err); alert('Could not parse this MIDI file: '+err.message); }
+};
+function readMidi(buffer) {
+  const dv=new DataView(buffer); let pos=0;
+  const u8=()=>dv.getUint8(pos++), u16=()=>{const v=dv.getUint16(pos);pos+=2;return v;}, u32=()=>{const v=dv.getUint32(pos);pos+=4;return v;};
+  const str=(n)=>{let out='';for(let i=0;i<n;i++)out+=String.fromCharCode(u8());return out;};
+  if(str(4)!=='MThd') throw new Error('Missing MThd header'); const hlen=u32(); const format=u16(), ntr=u16(), division=u16(); pos=8+hlen;
+  if(division & 0x8000) throw new Error('SMPTE-time MIDI is not supported; use ticks per quarter note.');
+  const tracks=[], tempo=[];
+  for(let ti=0;ti<ntr;ti++){
+    if(pos+8>dv.byteLength) break; const tag=str(4); const len=u32(); const end=pos+len; if(tag!=='MTrk'){pos=end;continue;}
+    let tick=0, running=0, name=''; const ev=[];
+    const vlq=()=>{let v=0,b;do{b=u8();v=(v<<7)|(b&127);}while(b&128);return v;};
+    while(pos<end){ tick+=vlq(); let status=u8(); if(status<0x80){pos--;status=running;} else if(status<0xf0) running=status;
+      if(status===0xff){const type=u8(),n=vlq(); if(type===0x03){let x='';for(let j=0;j<n;j++)x+=String.fromCharCode(u8());name=x;} else if(type===0x51 && n===3){const us=(u8()<<16)|(u8()<<8)|u8();tempo.push({tick,us});} else pos+=n; if(type===0x2f) {pos=end;break;} continue;}
+      if(status===0xf0||status===0xf7){pos+=vlq();continue;}
+      const cmd=status&0xf0, ch=status&15; if(cmd===0xc0||cmd===0xd0){u8();continue;} const a=u8(), b=u8();
+      if(cmd===0x90 && b>0) ev.push({tick,type:'on',pitch:a,velocity:b,ch}); else if(cmd===0x80 || (cmd===0x90 && b===0)) ev.push({tick,type:'off',pitch:a,ch});
+    }
+    pos=end; tracks.push({index:ti,name:name||`Track ${ti+1}`,events:ev});
+  }
+  if(!tempo.length) tempo.push({tick:0,us:500000}); tempo.sort((a,b)=>a.tick-b.tick);
+  const tm=[]; for(const t of tempo){if(tm.length&&tm[tm.length-1].tick===t.tick)tm[tm.length-1]=t;else tm.push(t);}
+  function secondsAt(target){let sec=0,lastTick=0,us=500000;for(const t of tm){if(t.tick>target)break;sec+=(t.tick-lastTick)*us/(division*1e6);lastTick=t.tick;us=t.us;}return sec+(target-lastTick)*us/(division*1e6);}
+  const notesByTrack=tracks.map(tr=>{const active=new Map(),out=[]; for(const e of tr.events){const key=e.ch+':'+e.pitch;if(e.type==='on'){if(!active.has(key))active.set(key,[]);active.get(key).push(e);}else{const q=active.get(key);if(q&&q.length){const on=q.shift();out.push({track:tr.index,pitch:e.pitch,startTick:on.tick,endTick:e.tick,start:secondsAt(on.tick),end:secondsAt(e.tick),velocity:on.velocity,channel:e.ch});}}} for(const q of active.values())for(const on of q)out.push({track:tr.index,pitch:on.pitch,startTick:on.tick,endTick:on.tick,start:secondsAt(on.tick),end:secondsAt(on.tick),velocity:on.velocity,channel:on.ch});return out.sort((a,b)=>a.startTick-b.startTick||a.pitch-b.pitch);});
+  return {format,division,tracks:tracks.map((t,i)=>({...t,notes:notesByTrack[i]})),tempo:tm,secondsAt};
+}
+function applyMidiSpeed(){
+  const oldSpeed=MIDI.speed||100, newSpeed=Math.max(10,Math.min(400,+$('midiSpeed').value||100));
+  const first=Math.min(...MIDI.originalTracks.flatMap(t=>t.notes.map(n=>n.start)).filter(Number.isFinite));
+  const anchor=Number.isFinite(first)?first:0;
+  const scale=100/newSpeed;
+  MIDI.tracks=MIDI.originalTracks.map(t=>({...t,notes:t.notes.map(n=>({...n,start:anchor+(n.start-anchor)*scale,end:anchor+(n.end-anchor)*scale}))}));
+  if(MIDI.rangeRules.length && oldSpeed!==newSpeed){
+    const ratio=oldSpeed/newSpeed;
+    for(const r of MIDI.rangeRules){r.start=anchor+(r.start-anchor)*ratio;r.end=anchor+(r.end-anchor)*ratio;}
+  }
+  MIDI.speed=newSpeed;
+}
+$('midiSpeed').onchange=()=>{
+  $('drumSpeed').value=$('midiSpeed').value;
+  if(!MIDI.originalTracks.length)return;
+  applyMidiSpeed();
+  refreshDrums();
+  renderMidiEvents();
+  $('midiInfo').textContent=`MIDI speed: ${MIDI.speed}% (${(100/MIDI.speed).toFixed(3)}× duration). The first note remains at its original time.`;
+};
+function pitchName(n){return ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'][n%12]+(Math.floor(n/12)-1);}
+async function loadMidi(buffer,name){
+  const parsed=readMidi(buffer); MIDI.originalTracks=parsed.tracks; MIDI.speed=Math.max(10,Math.min(400,+$('midiSpeed').value||100)); $('midiSpeed').value=MIDI.speed; applyMidiSpeed(); MIDI.division=parsed.division; MIDI.tempo=parsed.tempo; MIDI.name=name; MIDI.globalMap=new Map(); MIDI.rangeRules=[]; MIDI.occurrenceOverrides=new Map(); MIDI.chordRules=new Map(); MIDI.selectedGroup=null;
+  const likely=parsed.tracks.findIndex(t=>/PART GUITAR/i.test(t.name)); $('midiTrack').innerHTML=parsed.tracks.map(t=>`<option value="${t.index}">${escapeHtml(t.name)} (${t.notes.length})</option>`).join(''); $('midiTrack').value=String(likely>=0?likely:parsed.tracks.find(t=>t.notes.length)?.index??0); $('midiName').textContent=name;
+  const tr=currentTrack(); const hasGH=tr.notes.some(n=>n.pitch>=60&&n.pitch<=64)||tr.notes.some(n=>n.pitch>=72&&n.pitch<=76)||tr.notes.some(n=>n.pitch>=84&&n.pitch<=88)||tr.notes.some(n=>n.pitch>=96&&n.pitch<=100);
+  $('midiMode').value=hasGH?'auto':'generic'; rebuildMidiControls(); renderMidiMapping(); renderMidiEvents();
+  $('midiInfo').textContent=`Format ${parsed.format}, ${parsed.tracks.length} tracks, ${parsed.division} ticks/quarter. Selected track: ${tr.name}, ${tr.notes.length} note events.`;
+  $('mappingStatus').textContent='MIDI loaded. Check track and difficulty before importing.';
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function currentTrack(){return MIDI.tracks.find(t=>String(t.index)===$('midiTrack').value)||MIDI.tracks[0]||{name:'',notes:[]};}
+function difficultyBase(){return +$('midiDifficulty').value;}
+function currentNotes(){const tr=currentTrack().notes||[];if($('midiMode').value==='auto'){const b=difficultyBase();return tr.filter(n=>n.pitch>=b&&n.pitch<b+5);}return tr;}
+function groupNotes(notes){const map=new Map();for(const n of notes){const k=n.startTick;if(!map.has(k))map.set(k,{key:String(k),startTick:k,start:n.start,end:n.end,notes:[]});map.get(k).notes.push(n);}return [...map.values()].sort((a,b)=>a.startTick-b.startTick).map(g=>({...g,notes:g.notes.sort((a,b)=>a.pitch-b.pitch),pattern:g.notes.map(n=>n.pitch).join(',')}));}
+function rebuildMidiControls(){const pitches=[...new Set(currentTrack().notes.map(n=>n.pitch))].sort((a,b)=>a-b);$('rangePitch').innerHTML=pitches.map(p=>`<option value="${p}">${p} (${pitchName(p)})</option>`).join('');if(pitches.length){const d=+$('midiDifficulty').value;$('rangePitch').value=String(pitches.find(p=>p>=d&&p<d+5)??pitches[0]);}renderMidiMapping();renderRangeRules();}
+$('midiTrack').onchange=()=>{MIDI.globalMap=new Map();MIDI.rangeRules=[];MIDI.occurrenceOverrides.clear();MIDI.chordRules.clear();MIDI.selectedGroup=null;rebuildMidiControls();renderMidiEvents();};
+$('midiMode').onchange=()=>{renderMidiMapping();renderMidiEvents();};
+$('midiDifficulty').onchange=()=>{renderMidiEvents();};
+function renderMidiMapping(){const notes=currentTrack().notes||[];const pitches=[...new Set(notes.map(n=>n.pitch))].sort((a,b)=>a-b);if(!pitches.length){$('midiPitchMap').textContent='No notes in selected track.';return;} $('midiPitchMap').innerHTML=pitches.map(p=>{let lane=MIDI.globalMap.has(p)?MIDI.globalMap.get(p):defaultLaneForPitch(p);return `<div class="pitchRow"><span>${p} · ${pitchName(p)}</span><select data-pitch="${p}"><option value="-1" ${lane<0?'selected':''}>Ignore</option>${[0,1,2,3,4].map(l=>`<option value="${l}" ${lane===l?'selected':''}>Lane ${l+1}</option>`).join('')}</select></div>`;}).join('');$('midiPitchMap').querySelectorAll('select').forEach(sel=>sel.onchange=()=>{MIDI.globalMap.set(+sel.dataset.pitch,+sel.value);});}
+function defaultLaneForPitch(p){if($('midiMode').value==='auto'){const d=difficultyBase();return p>=d&&p<d+5?p-d:-1;}const pitches=[...new Set((currentTrack().notes||[]).map(n=>n.pitch))].sort((a,b)=>a-b);const rank=pitches.indexOf(p);return rank<0?-1:rank%5;}
+function renderRangeRules(){const el=$('rangeRules');if(!MIDI.rangeRules.length){el.textContent='No range overrides.';return;}el.innerHTML=MIDI.rangeRules.map((r,i)=>`<div>${r.pitch} (${pitchName(r.pitch)}) → ${r.lane<0?'Ignore':'Lane '+(r.lane+1)} from ${r.start.toFixed(2)}s to ${r.end.toFixed(2)}s <button data-delrange="${i}">Remove</button></div>`).join('');el.querySelectorAll('[data-delrange]').forEach(b=>b.onclick=()=>{MIDI.rangeRules.splice(+b.dataset.delrange,1);renderRangeRules();renderMidiEvents();});}
+$('addRangeRule').onclick=()=>{const pitch=+$('rangePitch').value,lane=+$('rangeLane').value,start=Math.max(0,+$('rangeStart').value||0),end=+$('rangeEnd').value;if(!Number.isFinite(end)||end<=start){alert('End time must be greater than start time.');return;}MIDI.rangeRules.push({pitch,lane,start,end});renderRangeRules();renderMidiEvents();};
+const midiRoll=$('midiRoll'), midiRollCtx=midiRoll.getContext('2d');
+$('midiRollRefresh').onclick=drawMidiRoll;
+$('midiViewStart').onchange=drawMidiRoll;
+function drawMidiRoll(){if(!midiRollCtx)return;const c=midiRoll,ctx=midiRollCtx,w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#11141b';ctx.fillRect(0,0,w,h);const start=Math.max(0,+$('midiViewStart').value||0),span=30,left=52,right=10,top=18,bottom=22,plotW=w-left-right,plotH=h-top-bottom;const ns=currentNotes();if(!ns.length){ctx.fillStyle='#8a90a3';ctx.fillText('No notes to display for this track/difficulty.',left,40);return;}const minP=Math.min(...ns.map(n=>n.pitch)),maxP=Math.max(...ns.map(n=>n.pitch)),range=Math.max(1,maxP-minP+1);for(let sec=0;sec<=span;sec+=5){const x=left+sec/span*plotW;ctx.strokeStyle='#2d3140';ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,top+plotH);ctx.stroke();ctx.fillStyle='#8a90a3';ctx.fillText((start+sec).toFixed(0)+'s',x-8,h-5);}for(let p=minP;p<=maxP;p++){const y=top+(maxP-p+0.5)/range*plotH;ctx.strokeStyle='#222734';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();ctx.fillStyle='#aeb4c6';ctx.fillText(pitchName(p),4,y+4);}for(const g of MIDI.groups){if(g.start<start||g.start>=start+span)continue;const x=left+(g.start-start)/span*plotW;for(const n of g.notes){const y=top+(maxP-n.pitch+0.5)/range*plotH;const lane=effectiveLane(n);ctx.fillStyle=lane>=0?COLORS[lane]:'#777';const duration=Math.max(4,Math.min(40,(n.end-n.start)/span*plotW));ctx.fillRect(x,y-4,duration,8);}if(g.key===MIDI.selectedGroup){ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.strokeRect(x-3,top+1,Math.max(7,Math.min(30,(g.end-g.start)/span*plotW+6)),plotH-2);ctx.lineWidth=1;}}ctx.fillStyle='#8a90a3';ctx.fillText(`Showing ${start.toFixed(1)}–${(start+span).toFixed(1)} seconds; click a note to select its onset group.`,left,12);}
+midiRoll.onclick=e=>{const rect=midiRoll.getBoundingClientRect(),x=(e.clientX-rect.left)*midiRoll.width/rect.width;const left=52,right=10,plotW=midiRoll.width-left-right,sec=Math.max(0,+$('midiViewStart').value||0)+(x-left)/plotW*30;let best=null,dist=Infinity;for(const g of MIDI.groups){if(g.start<sec-0.18||g.start>sec+0.18)continue;const d=Math.abs(g.start-sec);if(d<dist){dist=d;best=g;}}if(best)selectMidiGroup(best.key);};
+function renderMidiEvents(){const notes=currentNotes();MIDI.groups=groupNotes(notes);drawMidiRoll();const el=$('midiEvents');if(!MIDI.groups.length){el.textContent='No notes match the selected track and difficulty.';return;}const groups=MIDI.groups;const max=300;el.innerHTML=groups.slice(0,max).map((g,i)=>`<div class="midiEvent ${MIDI.selectedGroup===g.key?'selected':''}" data-group="${g.key}"><span>${g.start.toFixed(3)} s</span><span>${g.notes.map(n=>`${n.pitch} (${pitchName(n.pitch)})`).join(' + ')}</span><span>${g.notes.length>1?'Chord':'Note'}</span></div>`).join('')+(groups.length>max?`<div class="dim" style="padding:7px">Showing first ${max} of ${groups.length} onset groups.</div>`:'');el.querySelectorAll('[data-group]').forEach(row=>row.onclick=()=>selectMidiGroup(row.dataset.group));if(MIDI.selectedGroup&&!groups.some(g=>g.key===MIDI.selectedGroup))MIDI.selectedGroup=null;}
+function selectMidiGroup(key){MIDI.selectedGroup=key;const g=MIDI.groups.find(x=>x.key===key);if(!g)return;document.querySelectorAll('.manualLane').forEach(c=>c.checked=false);const mask=effectiveGroupMask(g);for(let i=0;i<5;i++)document.querySelector(`.manualLane[value="${i}"]`).checked=!!(mask&(1<<i));$('selectedEventInfo').textContent=`${g.start.toFixed(3)} s; MIDI pitches ${g.notes.map(n=>n.pitch).join(', ')}; current output: ${mask?maskToLanes(mask):'ignored'}.`;renderMidiEvents();}
+function maskToLanes(mask){return [0,1,2,3,4].filter(i=>mask&(1<<i)).map(i=>i+1).join(', ');}
+function effectiveLane(n){let lane=MIDI.globalMap.has(n.pitch)?MIDI.globalMap.get(n.pitch):defaultLaneForPitch(n.pitch);for(const r of MIDI.rangeRules)if(r.pitch===n.pitch&&n.start>=r.start&&n.start<r.end)lane=r.lane;return lane;}
+function effectiveGroupMask(g){if(MIDI.occurrenceOverrides.has(g.key))return MIDI.occurrenceOverrides.get(g.key);if(MIDI.chordRules.has(g.pattern))return MIDI.chordRules.get(g.pattern);let mask=0;for(const n of g.notes){const l=effectiveLane(n);if(l>=0&&l<5)mask|=1<<l;}return mask;}
+function selectedMask(){return [...document.querySelectorAll('.manualLane:checked')].reduce((m,c)=>m|(1<<+c.value),0);}
+$('applyOccurrence').onclick=()=>{if(!MIDI.selectedGroup){alert('Select a note or chord first.');return;}MIDI.occurrenceOverrides.set(MIDI.selectedGroup,selectedMask());selectMidiGroup(MIDI.selectedGroup);};
+$('applyChordGlobal').onclick=()=>{if(!MIDI.selectedGroup){alert('Select a note or chord first.');return;}const g=MIDI.groups.find(x=>x.key===MIDI.selectedGroup);if(!g)return;MIDI.chordRules.set(g.pattern,selectedMask());renderMidiEvents();selectMidiGroup(g.key);};
+$('clearMidiOverrides').onclick=()=>{MIDI.occurrenceOverrides.clear();MIDI.chordRules.clear();selectMidiGroup(MIDI.selectedGroup);};
+$('previewMapping').onclick=()=>{let n=0,ignored=0;for(const g of MIDI.groups){const m=effectiveGroupMask(g);if(!m)ignored+=g.notes.length;else n+=g.notes.length;} $('mappingStatus').textContent=`Preview: ${MIDI.groups.length} onset groups; ${n} source notes mapped; ${ignored} ignored.`;};
+$('commitMapping').onclick=()=>{
+  if(!MIDI.tracks.length){alert('Load a MIDI file first.');return;}const groups=MIDI.groups.length?MIDI.groups:groupNotes(currentNotes());const next=Array.from({length:5},()=>[]);const outFps=fps;let ignored=0;
+  for(const g of groups){const hasGroupOverride=MIDI.occurrenceOverrides.has(g.key)||MIDI.chordRules.has(g.pattern);const mask=effectiveGroupMask(g);if(!mask){ignored+=g.notes.length;continue;}const f=Math.round(g.start*outFps);if(f<0||f>MAXF)continue;for(let l=0;l<5;l++)if(mask&(1<<l)){const laneNotes=hasGroupOverride?g.notes:g.notes.filter(n=>effectiveLane(n)===l);if(!laneNotes.length)continue;const hold=laneNotes.some(n=>n.end-n.start>=0.18);const endSec=Math.max(...laneNotes.map(n=>n.end));next[l].push({f,h:hold,sourceEnd:Math.round(endSec*outFps)});}}
+  for(let l=0;l<5;l++){
+    const real=next[l].sort((a,b)=>a.f-b.f); const events=[];
+    for(let i=0;i<real.length;i++){
+      const n=real[i]; events.push({f:n.f,h:n.h});
+      if(!n.h) continue;
+      const following=real[i+1];
+      const endFrame=Math.min(n.sourceEnd, following?following.f:MAXF);
+      if(endFrame<=n.f) continue;
+      if(following && following.f===endFrame && following.h) continue;
+      events.push({f:endFrame,h:false,end:true});
+    }
+    events.sort((a,b)=>a.f-b.f || (a.end?-1:b.end?1:0));
+    next[l]=events;
+  }
+  const total=next.reduce((a,b)=>a+b.length,0);if(total+HDR>MEM_WORDS){alert(`Mapped chart needs ${total+HDR} words; the board's note memory holds ${MEM_WORDS}. Try a lower difficulty or a shorter section.`);return;}lanes=next;minLen=Math.max(100,Math.min(MAXF,Math.ceil(Math.max(0,...next.flat().map(n=>n.f))+120)));$('len').value=minLen;update();$('midiPanel').hidden=true;$('mappingStatus').textContent=`Imported ${total} lane events (including non-playable hold-end markers); ignored ${ignored} source notes.`;
+};
+
+// ---------- drums -> effects ----------
+const GM_DRUMS = {35:'Kick 2',36:'Kick',37:'Side stick',38:'Snare',39:'Clap',40:'Snare 2',41:'Low floor tom',42:'Closed hi-hat',
+  43:'High floor tom',44:'Pedal hi-hat',45:'Low tom',46:'Open hi-hat',47:'Low-mid tom',48:'Hi-mid tom',49:'Crash',50:'High tom',
+  51:'Ride',52:'China',53:'Ride bell',54:'Tambourine',55:'Splash',56:'Cowbell',57:'Crash 2',58:'Vibraslap',59:'Ride 2',
+  60:'Hi bongo',61:'Low bongo',62:'Mute hi conga',63:'Open hi conga',64:'Low conga',69:'Cabasa',70:'Maracas',75:'Claves',81:'Open triangle'};
+const GH_PADS = ['kick', 'red (snare)', 'yellow', 'blue', 'green'];
+const GH_DIFFS = {60: 'Easy', 72: 'Medium', 84: 'Hard', 96: 'Expert'};
+const DRUM_COLORS = ['#ff8a65', '#ffd54f', '#81c784', '#4dd0e1', '#9575cd', '#f06292', '#aed581', '#64b5f6', '#ffb74d', '#e57373', '#4db6ac', '#ba68c8'];
+
+function isGhDrumTrack(t) { return /DRUM/i.test(t.name) && t.notes.some(n => n.pitch >= 96 && n.pitch <= 100); }
+function drumSoundName(t, pitch, ch) {
+  if (isGhDrumTrack(t)) {
+    if (pitch === 95) return 'Expert 2x kick';
+    for (const base of [96, 84, 72, 60]) if (pitch >= base && pitch < base + 5) return `${GH_DIFFS[base]} ${GH_PADS[pitch - base]}`;
+    if (pitch >= 110 && pitch <= 112) return ['Yellow', 'Blue', 'Green'][pitch - 110] + ' tom marker';
+    // Everything else in a Harmonix drum track is a marker or an animation cue, not a hit.
+    if (pitch === 103) return 'Solo section';
+    if (pitch === 105 || pitch === 106) return `Phrase marker P${pitch - 104}`;
+    if (pitch === 116) return 'Overdrive section';
+    if (pitch >= 120 && pitch <= 124) return 'Drum fill / BRE';
+    if (pitch < 60) return 'Animation ' + pitch;
+    return 'Marker ' + pitch;
+  }
+  if (ch === 9 || /drum|perc|kit/i.test(t.name)) return GM_DRUMS[pitch] || ('Drum ' + pitch);
+  return pitchName(pitch);
+}
+function pickDrumTrack() {
+  const ts = MIDI.tracks;
+  const named = ts.find(t => /DRUM/i.test(t.name) && t.notes.length);
+  if (named) return named.index;
+  let best = null, most = 0;
+  for (const t of ts) { const c = t.notes.filter(n => n.channel === 9).length; if (c > most) { most = c; best = t; } }
+  return best ? best.index : (ts.find(t => t.notes.length)?.index ?? 0);
+}
+function drumTrack() { return MIDI.tracks.find(t => String(t.index) === $('drumTrack').value); }
+
+// Rebuild the drum sounds from the current MIDI, speed and fps, keeping each
+// sound's settings (shown, value, min velocity, every Nth) if it already existed.
+function refreshDrums() {
+  const t = drumTrack();
+  const old = new Map(DRUMS.sounds.map(s => [s.pitch, s]));
+  if (!t) { DRUMS.sounds = []; renderDrumTable(); update(); return; }
+  const byPitch = new Map();
+  for (const n of t.notes) {
+    const f = Math.round(n.start * fps); if (f < 0 || f > MAXF) continue;
+    if (!byPitch.has(n.pitch)) byPitch.set(n.pitch, {ch: n.channel, hits: new Map()});
+    const m = byPitch.get(n.pitch).hits;
+    m.set(f, Math.max(m.get(f) || 0, n.velocity || 100));   // two hits on one frame -> keep the louder
+  }
+  const gh = isGhDrumTrack(t);
+  DRUMS.sounds = [...byPitch.keys()].sort((a, b) => a - b).map((pitch, i) => {
+    const o = old.get(pitch), d = byPitch.get(pitch);
+    // Guitar Hero pads keep their own colour (kick orange, red, yellow, blue, green).
+    const pad = gh ? [96, 84, 72, 60].map(b => pitch - b).find(k => k >= 0 && k < 5) : undefined;
+    const color = pad !== undefined ? ['#ff9f43', '#ff5d73', '#ffd54f', '#4fc3f7', '#7bdc65'][pad] : DRUM_COLORS[i % DRUM_COLORS.length];
+    return {
+      pitch, name: drumSoundName(t, pitch, d.ch), color,
+      show: o ? o.show : (gh ? pitch >= 95 && pitch <= 100 : true),
+      value: o ? o.value : '', minVel: o ? o.minVel : 0, every: o ? o.every : 1,
+      hits: [...d.hits].map(([f, vel]) => ({f, vel})).sort((a, b) => a.f - b.f)
+    };
+  });
+  DRUMS.track = t.index;
+  $('drumInfo').textContent = `${t.name}: ${t.notes.length} hits, ${DRUMS.sounds.length} drum sounds` + (gh ? ' (Guitar Hero drum chart: Expert shown by default)' : '') + '.';
+  renderDrumTable(); update();
+}
+
+function renderDrumTable() {
+  const el = $('drumTable');
+  if (!DRUMS.sounds.length) { el.textContent = 'Load a MIDI file and choose its drum track.'; return; }
+  el.innerHTML = `<div class="drumRow drumHead"><span>Show</span><span></span><span>Sound</span><span>Hits</span><span title="Effect value to use for this sound. Blank = this sound never makes effects from rules (clicking a hit still uses the Effect value box).">Value</span><span title="Ignore hits quieter than this (MIDI velocity 0-127). Accents are usually louder.">Min velocity</span><span title="1 = every hit, 2 = every other hit, 4 = every fourth...">Every Nth</span></div>` +
+    // shown sounds first (the ones you are working with), then the rest, each by pitch
+    DRUMS.sounds.map((s, i) => [s, i]).sort((a, b) => (b[0].show - a[0].show) || (a[0].pitch - b[0].pitch)).map(([s, i]) => `<div class="drumRow">
+      <input type="checkbox" data-i="${i}" data-k="show" ${s.show ? 'checked' : ''}>
+      <span class="sw" style="background:${s.color}"></span>
+      <span>${escapeHtml(s.name)} <span class="dim">(${s.pitch})</span></span>
+      <span class="dim">${s.hits.length}</span>
+      <input type="number" min="0" max="${FX_MAXV}" placeholder="none" data-i="${i}" data-k="value" value="${s.value}">
+      <input type="number" min="0" max="127" data-i="${i}" data-k="minVel" value="${s.minVel}">
+      <input type="number" min="1" max="64" data-i="${i}" data-k="every" value="${s.every}">
+    </div>`).join('');
+  el.querySelectorAll('input').forEach(inp => inp.onchange = () => {
+    const s = DRUMS.sounds[+inp.dataset.i], k = inp.dataset.k;
+    if (k === 'show') { s.show = inp.checked; update(); return; }   // (table order updates next time it is rebuilt)
+    if (k === 'value') s.value = inp.value === '' ? '' : String(Math.max(0, Math.min(FX_MAXV, Math.round(+inp.value || 0))));
+    if (k === 'minVel') s.minVel = Math.max(0, Math.min(127, Math.round(+inp.value || 0)));
+    if (k === 'every') s.every = Math.max(1, Math.min(64, Math.round(+inp.value || 1)));
+    inp.value = s[k];
+    $('ruleStatus').textContent = '';
+  });
+}
+
+// The hits the rules would turn into effects, as [{f, v, sound}]
+function ruleHits() {
+  const from = Math.max(0, +$('ruleFrom').value || 0) * fps, to = (+$('ruleTo').value || 0) * fps, out = [];
+  for (const s of DRUMS.sounds) {
+    if (s.value === '') continue;
+    const v = +s.value;
+    const hits = s.hits.filter(h => h.vel >= s.minVel && h.f >= from && h.f <= to);
+    hits.forEach((h, i) => { if (i % s.every === 0) out.push({f: h.f, v, sound: s}); });
+  }
+  return out.sort((a, b) => a.f - b.f);
+}
+$('rulePreview').onclick = () => {
+  const r = ruleHits();
+  if (!DRUMS.sounds.some(s => s.value !== '')) { $('ruleStatus').textContent = 'Give at least one drum sound a value first.'; return; }
+  const per = {}; r.forEach(x => per[x.sound.name] = (per[x.sound.name] || 0) + 1);
+  const already = r.filter(x => effects.some(e => e.f === x.f)).length;
+  $('ruleStatus').textContent = `Would add ${r.length} effects (${Object.entries(per).map(([k, n]) => `${n} ${k}`).join(', ') || 'none'})` + (already ? `; ${already} land on frames that already have an effect and would change its value.` : '.');
+};
+$('ruleApply').onclick = () => {
+  const r = ruleHits();
+  if (!r.length) { $('ruleStatus').textContent = 'Nothing to add: give a drum sound a value, and check the From/To range.'; return; }
+  if (effects.length + r.length > MEM_WORDS - 1 && !confirm(`This would go past the ${MEM_WORDS - 1}-effect limit. Add as many as fit?`)) return;
+  let n = 0; for (const x of r) if (addEffect(x.f, x.v)) n++;
+  selFx = null; update();
+  $('ruleStatus').textContent = `Added or updated ${n} effects. Ctrl+Z is not available, so use "Remove effects in range" to undo a section.`;
+};
+$('ruleClear').onclick = () => {
+  const from = Math.max(0, +$('ruleFrom').value || 0) * fps, to = (+$('ruleTo').value || 0) * fps;
+  const gone = effects.filter(e => e.f >= from && e.f <= to);
+  if (!gone.length) { $('ruleStatus').textContent = 'No effects in that range.'; return; }
+  if (!confirm(`Remove ${gone.length} effects between ${(from / fps).toFixed(1)} s and ${(to / fps).toFixed(1)} s?`)) return;
+  effects = effects.filter(e => !(e.f >= from && e.f <= to)); selFx = null; update();
+  $('ruleStatus').textContent = `Removed ${gone.length} effects.`;
+};
+$('ruleFromPlayhead').onclick = () => { $('ruleFrom').value = (curFrame() / fps).toFixed(2); };
+
+$('drumToggle').onclick = () => { $('drumPanel').hidden = !$('drumPanel').hidden; };
+$('drumChoose').onclick = () => $('drumFile').click();
+$('drumFile').onchange = async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try { await loadMidi(await file.arrayBuffer(), file.name); }
+  catch (err) { console.error(err); alert('Could not parse this MIDI file: ' + err.message); return; }
+  afterMidiLoaded();
+};
+function afterMidiLoaded() {
+  $('drumName').textContent = MIDI.name;
+  $('drumTrack').innerHTML = MIDI.tracks.map(t => `<option value="${t.index}">${escapeHtml(t.name)} (${t.notes.length})</option>`).join('');
+  $('drumTrack').value = String(pickDrumTrack());
+  DRUMS.sounds = [];
+  refreshDrums();
+}
+$('drumTrack').onchange = () => { DRUMS.sounds = []; refreshDrums(); };
+$('drumSpeed').onchange = () => {
+  $('midiSpeed').value = Math.max(10, Math.min(400, +$('drumSpeed').value || 100));
+  $('midiSpeed').onchange();
+};
+
+// value names: "0=flash, 1=small flash"
+function parseFxNames() {
+  const map = {};
+  for (const part of $('fxnames').value.split(',')) {
+    const m = /^\s*(\d+)\s*=\s*(.+?)\s*$/.exec(part);
+    if (m) map[+m[1]] = m[2];
+  }
+  FX_NAMES = map;
+  try { localStorage.setItem('gh_fx_names', $('fxnames').value); } catch (_) {}
+  showFxName(); draw();
+}
+try { const saved = localStorage.getItem('gh_fx_names'); if (saved) $('fxnames').value = saved; } catch (_) {}
+$('fxnames').onchange = parseFxNames;
+
+// ---------- audio + transport ----------
+let fps = 59.5238, offset = 0, actx = null, buf = null, peaks = null, src = null;
+let playing = false, startCtx = 0, startFrame = 0, stopFrame = 0;
+const ac = () => actx || (actx = new (window.AudioContext || window.webkitAudioContext)());
+const curFrame = () => playing ? startFrame + (actx.currentTime - startCtx) * fps : stopFrame;
+
+function stopSrc() { if (src) { try { src.stop(); } catch (_) {} src.disconnect(); src = null; } }
+function startAt(frame) {
+  const c = ac(); stopSrc(); c.resume();
+  playing = true; startFrame = frame; startCtx = c.currentTime + 0.05;
+  if (buf) {
+    const t = frame / fps + offset;
+    if (t < buf.duration) {
+      src = c.createBufferSource(); src.buffer = buf; src.connect(c.destination);
+      if (t >= 0) src.start(startCtx, t); else src.start(startCtx - t, 0);
+    }
+  }
+}
+function stopPlay() { if (playing) { stopFrame = curFrame(); playing = false; stopSrc(); } }
+function seek(f) { const was = playing; stopPlay(); stopFrame = f; if (was) startAt(f); draw(); updateTime(); }
+function togglePlay() { if (playing) stopPlay(); else { startAt(stopFrame); loop(); } syncUI(); draw(); }
+function syncUI() { $('play').textContent = playing ? 'Pause (Space)' : 'Play (Space)'; }
+function updateTime() { const f = curFrame(); $('tdisp').textContent = `Playhead: frame ${Math.round(f)} (${(f / fps).toFixed(3)} s)`; }
+function loop() {
+  if (!playing || testing) return;
+  const f = curFrame();
+  if (f > viewLen()) { stopPlay(); syncUI(); draw(); return; }
+  scroller.scrollLeft = Math.max(0, PAD + f * ppf - cv.clientWidth * 0.4);
+  draw(); updateTime(); requestAnimationFrame(loop);
+}
+
+$('play').onclick = togglePlay;
+$('rew').onclick = () => { seek(0); scroller.scrollLeft = 0; };
+$('fps').onchange = e => { const f = curFrame(); fps = Math.max(1, Math.min(240, +e.target.value || 59.5238)); e.target.value = fps; seek(f); if (DRUMS.sounds.length) refreshDrums(); layout(); };
+function setShift(ms) {
+  const f = curFrame(); shiftMs = Math.round(ms * 10) / 10; offset = -shiftMs / 1000;
+  $('off').value = shiftMs; seek(f);
+}
+$('off').onchange = e => setShift(+e.target.value || 0);
+$('nl').onclick = e => setShift(shiftMs - (e.shiftKey ? 1 : 10));
+$('nr').onclick = e => setShift(shiftMs + (e.shiftKey ? 1 : 10));
+document.addEventListener('click', e => { if (e.detail > 0 && e.target.tagName === 'BUTTON') e.target.blur(); });
+
+$('audio').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('aname').textContent = 'Decoding...';
+  try { buf = await ac().decodeAudioData(await f.arrayBuffer()); }
+  catch (_) { $('aname').textContent = 'Could not decode this file.'; return; }
+  const d = buf.getChannelData(0), per = Math.floor(buf.sampleRate / 100);
+  peaks = new Float32Array(Math.ceil(d.length / per));
+  for (let i = 0; i < peaks.length; i++) {
+    let m = 0;
+    for (let j = i * per, e2 = Math.min(d.length, j + per); j < e2; j += 4) { const v = Math.abs(d[j]); if (v > m) m = v; }
+    peaks[i] = Math.sqrt(m);
+  }
+  $('aname').textContent = `${f.name} (${buf.duration.toFixed(1)} s, ${Math.round(buf.duration * fps)} frames)`;
+  layout();
+};
+
+function drawWave(w, sx) {
+  ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, RH, w, WAVE);
+  if (!peaks) {
+    ctx.fillStyle = '#4a5068'; ctx.font = '12px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle';
+    ctx.fillText('No audio loaded', PAD + 6, RH + WAVE / 2); return;
+  }
+  const mid = RH + WAVE / 2;
+  ctx.fillStyle = 'rgba(79,195,247,.75)';
+  for (let x = 0; x < w; x++) {
+    const t0 = ((sx + x - PAD) / ppf) / fps + offset, t1 = ((sx + x + 1 - PAD) / ppf) / fps + offset;
+    const i0 = Math.max(0, Math.floor(t0 * 100)), i1 = Math.min(peaks.length - 1, Math.ceil(t1 * 100));
+    if (t1 < 0 || i0 >= peaks.length) continue;
+    let m = 0;
+    for (let i = i0; i <= i1; i++) if (peaks[i] > m) m = peaks[i];
+    const h = m * (WAVE - 6) / 2;
+    ctx.fillRect(x, mid - h, 1, Math.max(1, h * 2));
+  }
+}
+
+// ---------- test run ----------
+let testing = false, testFrom = 0, testEnd = 0, tn = [], st = {score: 0, combo: 0, best: 0, perfect: 0, good: 0, miss: 0};
+let msg = '', msgC = '', msgT = 0, tfx = [], tfxNext = 0, flashUntil = -1, smallUntil = -1, smallColor = '#fff';
+const down = [false, false, false, false, false], flash = [0, 0, 0, 0, 0];
+const KEYS = ['KeyD', 'KeyF', 'Space', 'KeyJ', 'KeyK'], KEYL = ['D', 'F', 'Space', 'J', 'K'];
+const tc = $('tc'), tctx = tc.getContext('2d');
+const say = (m, c) => { msg = m; msgC = c; msgT = performance.now(); };
+
+function sizeT() {
+  const wrap = $('twrap'), d = window.devicePixelRatio || 1, w = wrap.clientWidth, h = wrap.clientHeight;
+  tc.width = w * d; tc.height = h * d; tc.style.width = w + 'px'; tc.style.height = h + 'px';
+  tctx.setTransform(d, 0, 0, d, 0, 0);
+}
+function startTest() {
+  tn = lanes.map(a => a.filter(n => !n.end).map(n => { const i=a.indexOf(n); return { f:n.f, h:n.h, end:n.h ? (a[i+1] ? a[i+1].f : n.f+DEFAULT_HOLD) : n.f, s:n.f<testFrom?1:0 }; }));
+  tfx = effects.filter(e => e.f >= testFrom); tfxNext = 0; flashUntil = -1; smallUntil = -1;
+  st = {score: 0, combo: 0, best: 0, perfect: 0, good: 0, miss: 0};
+  testEnd = Math.max(testFrom, ...tn.map(a => a.length ? a[a.length - 1].end : 0), ...tfx.map(e => e.f + FLASH_FRAMES));
+  down.fill(false); flash.fill(0); msg = '';
+  startAt(testFrom - 1.5 * fps);
+}
+function openTest() {
+  stopPlay(); syncUI(); testFrom = Math.max(0, Math.round(stopFrame));
+  document.activeElement.blur(); $('tov').hidden = false; testing = true;
+  sizeT(); startTest(); tloop();
+}
+function closeTest() { testing = false; stopPlay(); $('tov').hidden = true; stopFrame = testFrom; syncUI(); draw(); updateTime(); }
+$('testbtn').onclick = openTest;
+$('tclose').onclick = closeTest;
+$('trestart').onclick = () => { document.activeElement.blur(); startTest(); };
+addEventListener('resize', () => testing && sizeT());
+
+function hitNote(l, n, d) {
+  const p = d <= 0.05 * fps;
+  n.s = n.h ? 3 : 1;
+  if (p) st.perfect++; else st.good++;
+  st.combo++; st.best = Math.max(st.best, st.combo);
+  st.score += Math.round((p ? 300 : 100) * (1 + Math.min(st.combo, 50) / 50));
+  say(p ? 'Perfect' : 'Good', p ? '#e8b84a' : '#7bdc65'); flash[l] = 1;
+}
+function miss(n, m) { n.s = 2; st.miss++; st.combo = 0; say(m, '#ff5d73'); }
+
+function tick(cur) {
+  const win = 0.12 * fps, auto = $('auto').checked;
+  tn.forEach((arr, l) => {
+    for (const n of arr) {
+      if (n.f > cur + win) break;
+      if (n.s === 0) {
+        if (auto && cur >= n.f) hitNote(l, n, 0);
+        else if (cur - n.f > win) miss(n, 'Miss');
+      }
+      if (n.s === 3 && cur >= n.end) n.s = 1;
+    }
+  });
+  // effects: same as the hardware, a flash lasts FLASH_FRAMES frames
+  while (tfxNext < tfx.length && tfx[tfxNext].f <= cur) {
+    const v = tfx[tfxNext].v;
+    if (v === 0) flashUntil = tfx[tfxNext].f + FLASH_FRAMES;
+    // Anything else: a dimmer, shorter pulse in the effect's colour. Preview only -
+    // the board only acts on value 0 today.
+    else { smallUntil = tfx[tfxNext].f + 5; smallColor = fxColor(v); }
+    tfxNext++;
+  }
+}
+
+addEventListener('keydown', e => {
+  if (!testing) return;
+  if (e.code === 'Escape') { closeTest(); return; }
+  const l = KEYS.indexOf(e.code);
+  if (l < 0) return;
+  e.preventDefault();
+  if (e.repeat) return;
+  down[l] = true; flash[l] = Math.max(flash[l], 0.6);
+  if ($('auto').checked) return;
+  const cur = curFrame(), win = 0.12 * fps;
+  const n = tn[l].find(n => n.s === 0 && Math.abs(n.f - cur) <= win);
+  if (n) hitNote(l, n, Math.abs(n.f - cur));
+});
+addEventListener('keyup', e => {
+  if (!testing) return;
+  const l = KEYS.indexOf(e.code);
+  if (l < 0) return;
+  down[l] = false;
+  if ($('auto').checked) return;
+  const n = tn[l].find(n => n.s === 3);
+  if (n) { if (curFrame() >= n.end - 0.12 * fps) n.s = 1; else miss(n, 'Dropped'); }
+});
+
+function tloop() {
+  if (!testing) return;
+  const cur = curFrame(); tick(cur); drawTest(cur);
+  requestAnimationFrame(tloop);
+}
+
+function drawTest(cur) {
+  const c = tctx, w = tc.clientWidth, h = tc.clientHeight;
+  const LW = Math.min(96, (w - 20) / 5), x0 = (w - LW * 5) / 2, hy = h - 90, sp = +$('tspeed').value;
+  const Y = f => hy - (f - cur) * sp;
+  c.clearRect(0, 0, w, h);
+  for (let l = 0; l < LANES; l++) {
+    c.fillStyle = l % 2 ? '#10131a' : '#131720'; c.fillRect(x0 + l * LW, 0, LW, h);
+    if (down[l]) flash[l] = Math.max(flash[l], 0.4);
+    if (flash[l] > 0.02) {
+      c.globalAlpha = flash[l] * 0.35; c.fillStyle = COLORS[l]; c.fillRect(x0 + l * LW, 0, LW, hy); c.globalAlpha = 1;
+      flash[l] *= 0.9;
+    }
+    c.fillStyle = '#2d3140'; c.fillRect(x0 + l * LW, 0, 1, h);
+  }
+  c.fillRect(x0 + 5 * LW, 0, 1, h);
+  // screen flash, drawn as the background like highway_draw: fades 128 -> 16 over 8 frames
+  if (cur < smallUntil) {
+    const left = Math.ceil(smallUntil - cur);   // 5 .. 1
+    c.globalAlpha = left * 0.05; c.fillStyle = smallColor; c.fillRect(0, 0, w, h); c.globalAlpha = 1;
+  }
+  if (cur < flashUntil) {
+    const left = Math.ceil(flashUntil - cur);   // 8 .. 1
+    c.globalAlpha = Math.min(1, left * 16 / 255); c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h); c.globalAlpha = 1;
+  }
+  c.fillStyle = 'rgba(255,255,255,.7)'; c.fillRect(x0, hy - 1, LW * 5, 2);
+
+  // notes
+  tn.forEach((arr, l) => {
+    const cx = x0 + l * LW + LW / 2, hw = LW - 16;
+    for (const n of arr) {
+      const y = Y(n.f), ye = Y(n.end);
+      if (y < -30) break;
+      if (n.s === 1 || (y > h + 30 && ye > h + 30)) continue;
+      const holding = n.s === 3, yh = holding ? hy : y;
+      c.globalAlpha = n.s === 2 ? 0.3 : 1; c.fillStyle = COLORS[l];
+      if (n.h && ye < yh) { c.globalAlpha *= 0.8; c.fillRect(cx - 6, ye, 12, yh - ye); c.globalAlpha = n.s === 2 ? 0.3 : 1; }
+      c.beginPath(); c.roundRect(cx - hw / 2, yh - 12, hw, 24, 5); c.fill();
+      c.strokeStyle = 'rgba(255,255,255,.6)'; c.lineWidth = 1.5; c.stroke();
+      if (n.h) { c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(cx - 4, yh - 4, 8, 8); }
+      c.globalAlpha = 1;
+    }
+  });
+
+  // upcoming effects, as purple ticks at the right edge of the highway
+  c.fillStyle = '#c792ea';
+  for (let i = tfxNext; i < tfx.length; i++) {
+    const y = Y(tfx[i].f); if (y < -10) break;
+    c.fillRect(x0 + LW * 5 + 4, y - 2, 14, 4);
+  }
+
+  // key labels
+  c.font = '13px "Trebuchet MS",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (let l = 0; l < LANES; l++) {
+    const kx = x0 + l * LW + LW / 2, lit = down[l] || flash[l] > 0.5;
+    c.fillStyle = lit ? COLORS[l] : '#262a37'; c.beginPath(); c.roundRect(kx - 26, hy + 24, 52, 30, 6); c.fill();
+    c.fillStyle = lit ? '#14161c' : '#8a90a3'; c.fillText(KEYL[l], kx, hy + 39);
+  }
+
+  // HUD
+  c.fillStyle = '#d9dce6'; c.textBaseline = 'top'; c.textAlign = 'left'; c.font = '700 22px "Trebuchet MS",sans-serif';
+  c.fillText(String(st.score).padStart(7, '0'), 16, 14);
+  c.textAlign = 'center';
+  if (st.combo > 1) { c.font = '700 28px "Trebuchet MS",sans-serif'; c.fillText(st.combo + ' combo', w / 2, 46); }
+  const age = performance.now() - msgT;
+  if (msg && age < 500) {
+    c.globalAlpha = 1 - age / 500; c.fillStyle = msgC; c.font = '700 20px "Trebuchet MS",sans-serif';
+    c.fillText(msg, w / 2, hy - 110); c.globalAlpha = 1;
+  }
+  if (cur > testEnd + 0.8 * fps) {
+    c.fillStyle = 'rgba(10,11,15,.85)'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#d9dce6'; c.font = '700 30px "Trebuchet MS",sans-serif'; c.fillText('Finished', w / 2, h / 2 - 70);
+    c.font = '20px "Trebuchet MS",sans-serif';
+    c.fillText('Score ' + st.score, w / 2, h / 2 - 22);
+    c.fillText(`Perfect ${st.perfect}   Good ${st.good}   Miss ${st.miss}   Best combo ${st.best}`, w / 2, h / 2 + 14);
+    c.fillStyle = '#8a90a3'; c.font = '14px "Trebuchet MS",sans-serif';
+    c.fillText('Restart or press Esc to return to the editor', w / 2, h / 2 + 56);
+  }
+}
+
+// ---------- tempo, time signature, audio shift ----------
+let bpm = 120, sigN = 4, sigD = 4, songStart = 0, snapNote = 16, shiftMs = 0, wdrag = null;
+
+const snapStep = () => snapNote ? (fps * 60 / bpm) * 4 / snapNote : 0;   // frames per snap step; 0 = no snap
+const snapOrigin = () => songStart;
+function snapFrame(raw) {
+  const s = snapStep(), o = snapOrigin();
+  const f = s ? Math.round((raw - o) / s) * s + o : raw;
+  return Math.max(0, Math.min(MAXF, Math.round(f)));
+}
+const seekAt = x => seek(Math.max(0, Math.round((x + scroller.scrollLeft - PAD) / ppf)));
+
+function drawBeats(f0, f1, X) {
+  if (!$('grid').checked) return;
+  const bf = (fps * 60 / bpm) * 4 / sigD, barF = bf * sigN;
+  const k0 = Math.ceil((f0 - songStart) / bf), k1 = Math.floor((f1 - songStart) / bf);
+  const stride = Math.max(1, Math.ceil(30 / (barF * ppf)));
+  const showBeats = bf * ppf >= 4;
+  ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
+  for (let k = k0; k <= k1; k++) {
+    const bar = ((k % sigN) + sigN) % sigN === 0;
+    if (!bar && !showBeats) continue;
+    const x = Math.round(X(songStart + k * bf)) + .5;
+    ctx.strokeStyle = bar ? 'rgba(232,184,74,.5)' : 'rgba(255,255,255,.16)';
+    ctx.beginPath(); ctx.moveTo(x, bar ? RH - 8 : RULER); ctx.lineTo(x, H); ctx.stroke();
+    if (bar) {
+      const b = k / sigN;
+      if (((b % stride) + stride) % stride === 0) { ctx.fillStyle = '#e8b84a'; ctx.fillText(String(b + 1), x + 4, 20); }
+    }
+  }
+}
+
+const num = (el, lo, hi, d) => Math.max(lo, Math.min(hi, +el.value || d));
+$('bpm').onchange = e => { bpm = num(e.target, 20, 400, 120); e.target.value = bpm; draw(); };
+$('sign').onchange = e => { sigN = Math.round(num(e.target, 1, 32, 4)); e.target.value = sigN; draw(); };
+$('sigd').onchange = e => { sigD = +e.target.value; draw(); };
+$('sstart').onchange = e => { songStart = Math.round(num(e.target, -MAXF, MAXF, 0)); e.target.value = songStart; draw(); };
+$('sset').onclick = () => { songStart = Math.round(curFrame()); $('sstart').value = songStart; draw(); };
+$('snapnote').onchange = e => { snapNote = +e.target.value; draw(); };
+$('grid').onchange = () => draw();
+
+// drag the waveform to shift the audio (a click without movement seeks instead)
+addEventListener('mousemove', e => {
+  if (!wdrag) return;
+  const dx = e.clientX - cv.getBoundingClientRect().left - wdrag.x;
+  if (Math.abs(dx) > 3) wdrag.moved = true;
+  if (wdrag.moved) {
+    shiftMs = Math.round(wdrag.s + dx / ppf / fps * 1000); offset = -shiftMs / 1000;
+    $('off').value = shiftMs; draw();
+  }
+});
+addEventListener('mouseup', () => {
+  if (!wdrag) return;
+  const d = wdrag; wdrag = null;
+  if (d.moved) seek(curFrame()); else seekAt(d.x);
+});
+
+parseFxNames();
+update();
+</script>
+</body>
+</html>

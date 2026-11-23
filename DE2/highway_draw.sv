@@ -358,13 +358,16 @@ module highway_draw (
     //  address 64 -- notes then spent a whole second crawling through slots
     //  nothing could draw. Don't put the numbers back in by hand.
     //
-    //  A CAVEAT AT 128 SLOTS: the highway is only 384 scanlines tall, and the
-    //  far end of the perspective squeezes slots very tightly, so 13 of the
-    //  farthest slots (87, 94, 99, ... 125) get ZERO scanlines -- the generator
-    //  prints a warning listing them. A note passing through one of those is
-    //  invisible for that one frame, so expect a faint blink right at the
-    //  horizon. It fixes itself as the note gets closer. Drop N_SLOTS back to
-    //  64 if the blinking bothers you more than the shorter lookahead does.
+    //  THE SPAN BIT, AND WHY IT EXISTS: the highway is only 384 scanlines
+    //  tall, and the far end of the perspective squeezes slots very tightly,
+    //  so 13 of the farthest slots (87, 94, 99, ... 125) get ZERO scanlines.
+    //  With one-slot-per-row, a note passing through one of those had no row
+    //  to draw it and blinked out for a frame -- the flicker at the horizon.
+    //
+    //  Fix: SLOT_LUT bit 8 (`slot_span`) marks the row sitting just below each
+    //  skipped slot. That row draws its own slot AND slot+1, so every slot is
+    //  covered by at least one scanline and nothing disappears. The LUT never
+    //  skips more than one slot between rows, so one extra cell is enough.
     //
     //  THE FREE LUNCH: a note occupies exactly one slot. Slots near the horizon
     //  are only one or two scanlines tall; slots near the hit line are many
@@ -376,12 +379,14 @@ module highway_draw (
     logic [LUT_BITS-1:0]  slot_data;    // raw LUT word for this row
     logic                 slot_valid;   // top bit: row is inside the highway
     logic [SLOT_BITS-1:0] depth_slot;   // lower bits: how far away this row is
+    logic                 slot_span;    // this row also covers depth_slot + 1
 
     always_comb begin
         // y[8:0] because SLOT_LUT has 480 entries and only needs 9 index bits.
         // The guard keeps us from reading off the end during blanking.
         slot_data  = (y < 10'(SCREEN_H)) ? SLOT_LUT[y[8:0]] : '0;
 
+        slot_span  = slot_data[SLOT_BITS+1];      // span sits above valid
         slot_valid = slot_data[SLOT_BITS];        // the flag sits above the slot
         depth_slot = slot_data[SLOT_BITS-1:0];
     end
@@ -490,6 +495,8 @@ module highway_draw (
 
     logic [COLOR_BITS-1:0] draw_r, draw_g, draw_b;
     logic [1:0] note_cell;   // what is in this pixel's cell of the chart
+    logic [1:0] cell_a;      // the row's own slot
+    logic [1:0] cell_b;      // slot+1, only when the row spans a skipped slot
 
     // Glow Stuff
     logic [9:0] glow_dist; 
@@ -508,6 +515,12 @@ module highway_draw (
             draw_r = flashTimer << 4;
             draw_g = flashTimer << 4;
             draw_b = flashTimer << 4;
+
+            if(in_highway) begin
+                draw_r = flashTimer << 2;
+                draw_g = flashTimer << 2;
+                draw_b = flashTimer << 2;
+            end
         end
 
         // The glow's working signals need a default on EVERY path through this
@@ -522,9 +535,18 @@ module highway_draw (
 
         // ---- look up this pixel's cell -------------------------------------
         // "which lane"  x  "how far away"  ->  one cell of the chart.
+        // On a spanning row we read two cells and keep the more important one:
+        // NOTE beats HOLD beats nothing (HOLD_END draws as nothing anyway).
+        // slot_span is never set on slot 127, so depth_slot + 1 cannot wrap.
         note_cell = CELL_EMPTY;
+        cell_a    = CELL_EMPTY;
+        cell_b    = CELL_EMPTY;
         if (in_highway && slot_valid) begin
-            note_cell = slots[lane_idx][depth_slot];
+            cell_a = slots[lane_idx][depth_slot];
+            if (slot_span) cell_b = slots[lane_idx][depth_slot + 1'b1];
+
+            if      (cell_a == CELL_NOTE || cell_b == CELL_NOTE) note_cell = CELL_NOTE;
+            else if (cell_a == CELL_HOLD || cell_b == CELL_HOLD) note_cell = CELL_HOLD;
         end
 
         // ---- layer 2: notes and tails --------------------------------------
