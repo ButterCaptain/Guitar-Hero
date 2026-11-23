@@ -123,7 +123,7 @@ module highway_draw (
     //      TAIL_SHIFT = 2  ->  half the lane  (chunky)
     //      TAIL_SHIFT = 3  ->  a quarter      (default, looks like Guitar Hero)
     //      TAIL_SHIFT = 4  ->  an eighth      (spaghetti)
-    localparam int TAIL_SHIFT = 3;
+    localparam int TAIL_SHIFT = 2;
 
     // How much darker a tail is than a note head, as a right-shift.
     //   1 = half brightness, 2 = a quarter, 3 = an eighth.
@@ -466,7 +466,11 @@ module highway_draw (
         lane_w   = lane_r - lane_l;
         lane_mid = lane_l + (lane_w >> 1);    // >> 1 is divide by 2
 
+        // change this back for the narrower width of note tails
         band_half = lane_w >> TAIL_SHIFT;
+        //band_half = (lane_w >> 3) + (lane_w >> 4);   // 3/8 of the lane total
+
+
         // Up at the horizon a lane is only ~19 px wide, and 19 >> 3 = 2... but
         // if you crank TAIL_SHIFT up it can hit 0 and the tail vanishes. Floor
         // it at one pixel so a tail is always visible.
