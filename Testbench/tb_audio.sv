@@ -42,7 +42,14 @@ module tb_audio;
     logic       playing, failed;
     logic [7:0] status;
 
+    // A real SD slot has pull-up resistors on CMD and all four DAT lines.
+    // Without them an idle DAT0 reads as 0 in Verilator, which looks like a
+    // data start bit, and every sector comes back as zeros.
     pullup (sd_cmd);
+    pullup (sd_dat[0]);
+    pullup (sd_dat[1]);
+    pullup (sd_dat[2]);
+    pullup (sd_dat[3]);
     pullup (i2c_sdat);
 
     audio_top #(
@@ -93,12 +100,19 @@ module tb_audio;
     logic [15:0] sec_data [0:`N_SECTORS*256-1];
     logic [31:0] expected [0:`N_SAMPLES-1];
     string dir;
+    int    first_nz;          // index of the first non-zero expected sample
 
     initial begin
         if (!$value$plusargs("DIR=%s", dir)) dir = "build_audio";
         $readmemh($sformatf("%s/sd_map.hex", dir),   sec_map);
         $readmemh($sformatf("%s/sd_data.hex", dir),  sec_data);
         $readmemh($sformatf("%s/expected.hex", dir), expected);
+        // Real songs often start with digital silence, and silence coming out
+        // of the chip looks the same whether the song has started or not. So
+        // we line up on the first NON-ZERO sample, and skip the song's leading
+        // zeros in the expected list to match.
+        first_nz = `N_SAMPLES;
+        for (int i = `N_SAMPLES - 1; i >= 0; i--) if (expected[i] != 0) first_nz = i;
     end
 
     // rdaddr counts 16-bit words: sector = addr / 256.
@@ -163,7 +177,9 @@ module tb_audio;
         if (aud_daclrck != prev_lrck) begin
             bitpos = 0;
             if (!aud_daclrck) begin                  // new frame
-                if (frame_len >= 0 && bclks != `FRAME_BCLKS) bad_frames++;
+                // Before the WAV header is read the clocks run at the 48 kHz
+                // default, so only check frame length once playing.
+                if (playing && frame_len >= 0 && bclks != `FRAME_BCLKS) bad_frames++;
                 frame_len = bclks;
                 bclks = 0;
             end
@@ -179,7 +195,10 @@ module tb_audio;
     end
 
     task automatic check_sample(input logic [31:0] s);
-        if (!started && s != 0) started = 1;
+        if (!started && s != 0) begin
+            started = 1;
+            n_got   = first_nz;
+        end
         if (started) begin
             if (n_got < `N_SAMPLES) begin
                 if (s !== expected[n_got]) begin
@@ -214,16 +233,20 @@ module tb_audio;
             if (!failed || playing) begin
                 $display("FAIL: expected `failed`"); pass = 0;
             end
-            $display(pass ? "PASS (missing file reported as failed)" : "FAIL");
+            if (pass) $display("PASS (missing file reported as failed)");
+            else      $display("FAIL");
             $finish;
         end
 
-        if (!playing) begin
-            $display("FAIL: audio did not start"); $finish;
+        else if (!playing) begin
+            $display("FAIL: audio did not start");
+            $finish;
         end
+        else begin
 
         // Song length + some slack.
         #(64'd83333 * (`N_SAMPLES * `FRAME_BCLKS + 20000));
+        if (first_nz == `N_SAMPLES) n_got = `N_SAMPLES;   // song is all silence
 
         $display("samples received : %0d / %0d", n_got, `N_SAMPLES);
         $display("mismatches       : %0d", errors);
@@ -244,13 +267,16 @@ module tb_audio;
         if (status[6] || status[5] || status[7])   pass = 0;   // underrun / nack / wav err
         if (!seen_pause)                           pass = 0;
 
-        $display(pass ? "PASS" : "FAIL");
+        if (pass) $display("PASS");
+        else      $display("FAIL");
         $finish;
+        end   // else (playing)
     end
 
-    // Hard stop in case something hangs.
+    // Hard stop in case something hangs: 400 ms of start-up allowance plus
+    // twice the length of the song.
     initial begin
-        #(64'd400_000_000_000);
+        #(64'd400_000_000_000 + 64'd2 * 64'd83333 * `N_SAMPLES * `FRAME_BCLKS);
         $display("FAIL: timeout");
         $finish;
     end

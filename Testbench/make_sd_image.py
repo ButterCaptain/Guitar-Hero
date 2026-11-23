@@ -30,7 +30,29 @@ import struct
 SECTOR = 512
 
 
-def build(out, rate, channels, frames, file_name):
+def read_wav(path):
+    """Return (rate, channels, raw 16-bit PCM bytes) from a WAV file."""
+    f = open(path, "rb").read()
+    if f[0:4] != b"RIFF" or f[8:12] != b"WAVE":
+        raise SystemExit(f"{path}: not a RIFF/WAVE file")
+    i, fmt = 12, None
+    while i + 8 <= len(f):
+        cid, size = f[i:i + 4], struct.unpack_from("<I", f, i + 4)[0]
+        if cid == b"fmt ":
+            fmt = struct.unpack_from("<HHIIHH", f, i + 8)
+        elif cid == b"data":
+            if fmt is None:
+                raise SystemExit(f"{path}: data chunk before fmt chunk")
+            tag, channels, rate, _, _, bits = fmt
+            if tag not in (1, 0xFFFE) or bits != 16 or channels not in (1, 2):
+                raise SystemExit(f"{path}: need 16-bit PCM mono/stereo, got "
+                                 f"format {tag:#x}, {channels} ch, {bits} bit")
+            return rate, channels, f[i + 8:i + 8 + size]
+        i += 8 + size + (size & 1)
+    raise SystemExit(f"{path}: no data chunk")
+
+
+def build(out, rate, channels, frames, file_name, wav_path=None, seconds=None):
     sectors = {}
 
     def put(lba, offset, data):
@@ -78,10 +100,21 @@ def build(out, rate, channels, frames, file_name):
 
     # ---- the WAV file ------------------------------------------------------
     samples = []
-    for i in range(frames):
-        left = (i * 7 + 1) & 0xFFFF
-        right = (0x8000 + i * 13) & 0xFFFF
-        samples.append((left, left) if channels == 1 else (left, right))
+    if wav_path:
+        # A real song: take its format and the first `seconds` of its audio.
+        rate, channels, raw = read_wav(wav_path)
+        n = len(raw) // (2 * channels)
+        if seconds is not None:
+            n = min(n, int(seconds * rate))
+        for i in range(n):
+            left = struct.unpack_from("<H", raw, i * 2 * channels)[0]
+            right = struct.unpack_from("<H", raw, i * 2 * channels + 2)[0] if channels == 2 else left
+            samples.append((left, right))
+    else:
+        for i in range(frames):
+            left = (i * 7 + 1) & 0xFFFF
+            right = (0x8000 + i * 13) & 0xFFFF
+            samples.append((left, left) if channels == 1 else (left, right))
 
     pcm = bytearray()
     for left, right in samples:
@@ -187,5 +220,8 @@ if __name__ == "__main__":
     ap.add_argument("--channels", type=int, default=2)
     ap.add_argument("--frames", type=int, default=2500)
     ap.add_argument("--name", default="song.wav", help="file name to put on the card")
+    ap.add_argument("--wav", help="use this real WAV instead of a made-up one "
+                                  "(its rate and channels override --rate/--channels)")
+    ap.add_argument("--seconds", type=float, help="with --wav: only use the first N seconds")
     a = ap.parse_args()
-    build(a.out, a.rate, a.channels, a.frames, a.name)
+    build(a.out, a.rate, a.channels, a.frames, a.name, a.wav, a.seconds)
