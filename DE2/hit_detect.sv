@@ -113,11 +113,12 @@ module hit_detect #(
                                 state <= COOLDOWN;
                             end
                             else begin
-                                score <= score - 16'sd5;
+                                if(score != 16'sd0)
+                                    score <= score - 16'sd5;
                             end
                             
                         end
-                        else if (note_at_bottom) begin
+                        else if (note_at_bottom & (score != 16'sd0)) begin
                             score <= score - 16'sd5;
                         end
                         else begin 
@@ -127,7 +128,7 @@ module hit_detect #(
                             for (int L = 0; L < N_LANES; L++) begin
                                 if (hold_line[L]) begin
                                     if(fret[L]) score <= score + 16'sd1;
-                                    else        score <= score - 16'sd1;
+                                    else  if (score != 16'sd0) score <= score - 16'sd1;
                                 
                                 end
                             end
