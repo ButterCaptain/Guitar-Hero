@@ -55,6 +55,8 @@ module de2_115_top (
     output logic        VGA_SYNC_N,
     output logic        VGA_HS,
     output logic        VGA_VS,
+	 
+	 output logic [6:0] HEX0, HEX1, HEX2, HEX3,
 
     // ---- SD card slot (1-bit SD mode) ------------------------------------
     output logic        SD_CLK,
@@ -145,7 +147,8 @@ module de2_115_top (
     // ===============================================================
 
     score_top u_score (
-        .score       (score)
+        .score_in (score),
+		  .seg0 (HEX0), .seg1 (HEX1), .seg2 (HEX2), .seg3 (HEX3), 
     );
 
 

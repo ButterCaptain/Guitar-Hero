@@ -1,14 +1,17 @@
 module score_top (
-    input [15:0] score_in,
+    input logic [15:0] score_in,
     output [6:0] seg0, 
     output [6:0] seg1,
     output [6:0] seg2,
     output [6:0] seg3
 );
-    logic [3:0] ones = score % 10; 
-    logic [3:0] tens = (score / 10) % 10;
-    logic [3:0] hundreds = (score / 100) % 10;
-    logic [3:0] thousands = (score / 1000) % 10;
+
+	
+	wire [15:0] s = score_in[15] ? 16'd0 : score_in;
+    wire [3:0] ones = s % 10; 
+    wire [3:0] tens = (s / 10) % 10;
+    wire [3:0] hundreds = (s / 100) % 10;
+    wire [3:0] thousands = (s / 1000) % 10;
     hex7seg seg0_unit (
         .digit (ones),
         .seg   (seg0)
