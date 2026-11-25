@@ -8,6 +8,7 @@ module guitar_top (
     input  logic [4:0] fret,
     input  logic       strum_up,
     input  logic       strum_down,
+    input  logic       rst_n,
 
     // VGA
     output logic [7:0]  VGA_R,
@@ -42,7 +43,7 @@ module guitar_top (
 
     // Active-low button for rst
     logic rst;
-    assign rst = ~KEY[0];
+    assign rst = ~rst_n;
 
     // Audio subsystem 
     logic clk_aud, pll_locked;
