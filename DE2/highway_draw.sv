@@ -193,8 +193,13 @@ module highway_draw (
 
     logic [7:0] flashTimer;
 
+    logic [7:0] inboundFlashTimer;
+
     logic flash_on;
     assign flash_on = (flashTimer != 0);
+
+    logic inbflash_on;
+    assign inbflash_on = (inboundFlashTimer != 0);
    
 
     always_ff @(posedge clk50) begin
@@ -204,10 +209,20 @@ module highway_draw (
     always_ff @(posedge clk50) begin
         if(rst)
             flashTimer <= '0;
-        else if(effect_fire && effect_word[18:15] == '0) // flash
+        else if(effect_fire && effect_word[15] == '1) // flash
             flashTimer <= 8'd8;
-        else if (frame_tick && flashTimer != 0)
+        else if (frame_tick && flashTimer != 0) begin
             flashTimer <= flashTimer - 1'b1;
+        end
+
+             if(rst)
+            inboundFlashTimer <= '0;
+        else if(effect_fire && effect_word[16] == 1) // flash lanes
+            inboundFlashTimer <= 8'd8;
+        else if (frame_tick && inboundFlashTimer != 0)
+            inboundFlashTimer <= inboundFlashTimer - 1'b1;
+
+            
     end
 
     always_comb begin
@@ -332,49 +347,6 @@ module highway_draw (
             on_outline = 1'b1;
         end
     end
-
-    // ========================================================================
-    //  STAGE 5 -- HOW FAR AWAY IS THIS ROW? (the perspective)
-    // ========================================================================
-    //  In a 3D view, distance is NOT proportional to screen row. Rows near the
-    //  horizon cover a huge amount of distance; rows near your face cover very
-    //  little. The real formula involves a divide:
-    //
-    //      depth = q0 * up / (q0 - up)
-    //
-    //  We are not doing a divide per pixel. gen_highway_pkg.py evaluates that
-    //  formula once for all 480 rows and bakes the answers into SLOT_LUT. At
-    //  runtime this is a single table read -- a ROM lookup, basically free.
-    //
-    //      SLOT_LUT[y] top bit   = 1 if this row is inside the highway
-    //      SLOT_LUT[y] lower bits = which depth slot the row belongs to
-    //                               (0 = at the hit line, bigger = further)
-    //
-    //  THE WIDTHS COME FROM THE PACKAGE, ON PURPOSE. SLOT_BITS is how many bits
-    //  a slot number needs and LUT_BITS is that plus one for the valid flag.
-    //  Both are computed from N_SLOTS by the generator, so if you change the
-    //  slot count these registers resize themselves. Hardcoding 6 and 7 here is
-    //  what let N_SLOTS get bumped to 128 while the renderer could still only
-    //  address 64 -- notes then spent a whole second crawling through slots
-    //  nothing could draw. Don't put the numbers back in by hand.
-    //
-    //  THE SPAN BIT, AND WHY IT EXISTS: the highway is only 384 scanlines
-    //  tall, and the far end of the perspective squeezes slots very tightly,
-    //  so 13 of the farthest slots (87, 94, 99, ... 125) get ZERO scanlines.
-    //  With one-slot-per-row, a note passing through one of those had no row
-    //  to draw it and blinked out for a frame -- the flicker at the horizon.
-    //
-    //  Fix: SLOT_LUT bit 8 (`slot_span`) marks the row sitting just below each
-    //  skipped slot. That row draws its own slot AND slot+1, so every slot is
-    //  covered by at least one scanline and nothing disappears. The LUT never
-    //  skips more than one slot between rows, so one extra cell is enough.
-    //
-    //  THE FREE LUNCH: a note occupies exactly one slot. Slots near the horizon
-    //  are only one or two scanlines tall; slots near the hit line are many
-    //  scanlines tall. So a note automatically shrinks as it gets further away
-    //  and grows as it comes at you, with zero extra maths. That is the entire
-    //  3D effect, and it cost us one table.
-    // ========================================================================
 
     logic [LUT_BITS-1:0]  slot_data;    // raw LUT word for this row
     logic                 slot_valid;   // top bit: row is inside the highway
@@ -527,11 +499,18 @@ module highway_draw (
             end
         end
 
-        // The glow's working signals need a default on EVERY path through this
-        // block, not just inside the glow's `if`. Without these, a pixel that
-        // takes no glow branch has no assignment at all, so the synthesiser has
-        // to build a latch to hold the previous pixel's value -- which is both
-        // wrong and a timing nightmare. Assign first, override later.
+        if (inbflash_on) begin
+        
+            //here
+
+            if(in_highway && effect_word[17 + lane_idx]) begin
+                draw_r = inboundFlashTimer << 4;
+                draw_g = inboundFlashTimer << 4;
+                draw_b = inboundFlashTimer << 4;
+            end
+        end
+
+        
         glow_dist = 10'd0;
         r_add     = '0;
         g_add     = '0;
