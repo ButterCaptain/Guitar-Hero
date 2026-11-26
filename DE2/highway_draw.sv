@@ -195,12 +195,19 @@ module highway_draw (
 
     logic [7:0] inboundFlashTimer;
 
+    logic [7:0] redShimmerValue;
+    logic [3:0] redShimmerFlucuation;
+
     logic flash_on;
     assign flash_on = (flashTimer != 0);
 
     logic inbflash_on;
     assign inbflash_on = (inboundFlashTimer != 0);
-   
+
+    logic redShimmer_on;
+    assign redShimmer_on = (redShimmerValue != 0);
+
+    logic [4:0] laneMask;
 
     always_ff @(posedge clk50) begin
         last_x <= x;
@@ -209,18 +216,33 @@ module highway_draw (
     always_ff @(posedge clk50) begin
         if(rst)
             flashTimer <= '0;
-        else if(effect_fire && effect_word[15] == '1) // flash
+        else if(effect_fire && !effect_word[22] && effect_word[15] == '1) // flash
             flashTimer <= 8'd8;
         else if (frame_tick && flashTimer != 0) begin
             flashTimer <= flashTimer - 1'b1;
         end
 
+        
+
              if(rst)
             inboundFlashTimer <= '0;
-        else if(effect_fire && effect_word[16] == 1) // flash lanes
+        else if(effect_fire && !effect_word[22] && effect_word[16] == 1) begin // flash lanes
             inboundFlashTimer <= 8'd8;
+            laneMask <= effect_word[21:17];
+        end
         else if (frame_tick && inboundFlashTimer != 0)
             inboundFlashTimer <= inboundFlashTimer - 1'b1;
+
+
+            if(rst) begin
+            redShimmerValue <= '0;
+            redShimmerFlucuation <= '0;
+            end
+        else if(effect_fire && effect_word[22] == 1) // red shimmer
+            redShimmerValue <= effect_word[21:15];
+        else if (frame_tick && redShimmerValue != 0) begin
+            redShimmerFlucuation <= redShimmerFlucuation + 5; 
+        end
 
             
     end
@@ -309,6 +331,12 @@ module highway_draw (
     logic       in_highway;    // is this pixel inside the painted trapezoid?
     logic [2:0] lane_idx;      // 0..4, which lane. Junk unless in_highway.
     logic       on_outline;    // is this pixel part of the white wireframe?
+    
+    localparam int SHIM_CENTER = 16;   // bar center: this many px outside the highway edge
+
+    logic       on_shimmer;
+    logic [7:0] shimHalf;              // how far the bar reaches each side of its center
+    assign shimHalf = (redShimmerValue >> 1) + redShimmerFlucuation[3:2];   // width/2 + 0..7 wobble
 
     always_comb begin
         // --- vertical test: are we between the far edge and the hit line? ---
@@ -320,6 +348,8 @@ module highway_draw (
         in_highway = 1'b0;
         lane_idx   = 3'd0;
 
+
+        // draw the bounds
         if (row_in_range) begin
             if      (x >= edge_x[0] && x < edge_x[1]) begin in_highway = 1'b1; lane_idx = 3'd0; end
             else if (x >= edge_x[1] && x < edge_x[2]) begin in_highway = 1'b1; lane_idx = 3'd1; end
@@ -327,6 +357,24 @@ module highway_draw (
             else if (x >= edge_x[3] && x < edge_x[4]) begin in_highway = 1'b1; lane_idx = 3'd3; end
             else if (x >= edge_x[4] && x < edge_x[5]) begin in_highway = 1'b1; lane_idx = 3'd4; end
         end
+
+        on_shimmer = 1'b0;
+if (row_in_range && redShimmer_on) begin
+    // left bar
+    if (x + SHIM_CENTER + shimHalf >= edge_x[0] &&
+        x + SHIM_CENTER <= edge_x[0] + shimHalf &&
+        x < edge_x[0])
+        on_shimmer = 1'b1;
+
+    // right bar
+    if (x + shimHalf >= edge_x[5] + SHIM_CENTER &&
+        x <= edge_x[5] + SHIM_CENTER + shimHalf &&
+        x > edge_x[5])
+        on_shimmer = 1'b1;
+end   
+
+
+        //refrence point 
 
         // --- the white wireframe --------------------------------------------
         // The six slanted lines: just light up the single pixel sitting exactly
@@ -502,8 +550,9 @@ module highway_draw (
         if (inbflash_on) begin
         
             //here
+    
 
-            if(in_highway && effect_word[17 + lane_idx]) begin
+            if(in_highway && laneMask[lane_idx]) begin
                 draw_r = inboundFlashTimer << 4;
                 draw_g = inboundFlashTimer << 4;
                 draw_b = inboundFlashTimer << 4;
@@ -579,7 +628,11 @@ module highway_draw (
             draw_b = b_add[COLOR_BITS] ? '1 : b_add[COLOR_BITS-1:0];
         end
 
-
+        if (on_shimmer) begin
+            draw_r = {1'b1, redShimmerFlucuation, 3'b000};   // 128..252, the same for every pixel this frame
+            draw_g = '0;
+            draw_b = '0;
+        end
 
         // ---- layer 3: the wireframe, last so it is always on top -----------
         if (on_outline) begin
