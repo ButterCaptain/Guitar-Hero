@@ -7,13 +7,13 @@ module tb_guitar_top;
     logic        CLOCK_50 = 0;
     always #10 CLOCK_50 = ~CLOCK_50;
 
-    // Inputs
-    logic [3:0]  KEY;
+    // DUT Inputs
+    logic        rst_n;
     logic [4:0]  fret;
     logic        strum_up;
     logic        strum_down;
 
-    // Outputs
+    // DUT Outputs
     logic [7:0]  VGA_R, VGA_G, VGA_B;
     logic        VGA_CLK, VGA_BLANK_N, VGA_SYNC_N, VGA_HS, VGA_VS;
     logic [6:0]  HEX0, HEX1, HEX2, HEX3;
@@ -25,10 +25,10 @@ module tb_guitar_top;
     logic [17:0] LEDR;
     logic [8:0]  LEDG;
 
-    // Instantiate DUT
+    // Instantiate DUT (uses rst_n active-low reset)
     guitar_top dut (
         .CLOCK_50    (CLOCK_50),
-        .KEY         (KEY),
+        .rst_n       (rst_n),
         .fret        (fret),
         .strum_up    (strum_up),
         .strum_down  (strum_down),
@@ -57,63 +57,101 @@ module tb_guitar_top;
         .LEDG        (LEDG)
     );
 
-    // Helper task to wait N VGA frames
+    // Helper task to wait N VGA frames (~16.8 ms per frame)
     task automatic wait_frames(int n);
         repeat (n) @(posedge dut.frame_tick);
     endtask
 
     initial begin
-        // 1. Initialize & Reset (KEY[0] is active-low)
-        KEY        = 4'b1110;
+        // --------------------------------------------------------------------
+        // 1. Initialize & Release Reset
+        // --------------------------------------------------------------------
+        rst_n      = 1'b0;
         fret       = 5'b00000;
-        strum_up   = 1'b0;
-        strum_down = 1'b0;
+        strum_up   = 1'b1;   // strum buttons are active-low: 1 = not pressed
+        strum_down = 1'b1;
 
         repeat (10) @(posedge CLOCK_50);
-        KEY = 4'b1111; // Release reset
+        rst_n = 1'b1;
 
-        // Bypass the 3-second (150M cycle) SD card timeout for fast simulation
+        // Bypass the 3-second (150M cycle) SD card timeout so game_rst drops immediately
         force dut.u_audio.failed = 1'b1;
         repeat (5) @(posedge CLOCK_50);
 
         assert (dut.game_rst == 1'b0)
-            else $fatal(1, "game_rst did not release after audio_failed!");
-        $display("[%0t] Reset released. Initial Score = %0d, HEX0 = %b", $time, dut.score, HEX0);
+            else $fatal(1, "ERROR: game_rst did not release!");
+        $display("[%0t] Reset released. Score = %0d, HEX0 = %b", $time, dut.score, HEX0);
 
-        // 2. Wait for notes from notes.hex to travel down the 128-slot highway
-        // Note: notes spawn at slot 127 and shift 1 slot per frame_tick (~60 Hz)
-        wait_frames(130);
-        $display("[%0t] After 130 frames: Score = %0d", $time, dut.score);
+        // Wait 1 full VGA frame so VGA_HS, VGA_VS, and frame_tick are active
+        wait_frames(1);
 
-        // 3. Dynamically detect any note entering the HIT_WINDOW (slots 0..3) and hit it
-        fork
-            begin : auto_player
-                forever begin
-                    @(posedge CLOCK_50);
-                    // Check if any lane has CELL_NOTE in slot 1 (sweet spot)
-                    for (int L = 0; L < N_LANES; L++) begin
-                        if (dut.slots[L][1] == CELL_NOTE && dut.hit_unit.state == 2'd0) begin
-                            fret[L]  <= 1'b1;
-                            strum_up <= 1'b1;
-                            @(posedge dut.frame_tick);
-                            @(posedge CLOCK_50);
-                            strum_up <= 1'b0;
-                            fret     <= 5'b00000;
-                            $display("[%0t] Hit note on lane %0d! New Score = %0d (LEDG = %0d)",
-                                     $time, L, dut.score, LEDG);
-                        end
-                    end
-                end
-            end
-            begin : sim_timer
-                wait_frames(40); // Run for 40 more frames after notes arrive
-                disable auto_player;
-            end
-        join
+        // --------------------------------------------------------------------
+        // 2. Test Case 1: Valid Note Hit (+10 points)
+        // --------------------------------------------------------------------
+        // Inject a note into Lane 0, Slot 1 (inside HIT_WINDOW = 4)
+        force dut.slots[0][1] = CELL_NOTE;
+        @(posedge CLOCK_50);
 
-        // Verify VGA sync activity occurred
-        assert (VGA_SYNC_N == 1'b1) else $error("VGA_SYNC_N mismatch");
-        $display("[%0t] Testbench complete. Final Score = %0d, HEX0 = %b", $time, dut.score, HEX0);
+        // Press Green fret (lane 0) and strum up
+        fret[0]  = 1'b1;
+        strum_up = 1'b0;   // press (active-low)
+
+        // Hold until hit_detect samples it on frame_tick
+        @(posedge dut.frame_tick);
+        @(posedge CLOCK_50);
+
+        // Release strum, fret, and forced slot so the note clears cleanly
+        strum_up = 1'b1;   // release
+        fret[0]  = 1'b0;
+        release dut.slots[0][1];
+
+        $display("[%0t] Test 1 (Valid Hit): Score = %0d (Expected: 10), HEX0 = %b",
+                 $time, dut.score, HEX0);
+
+        // Wait out the 4-frame COOLDOWN window so hit_detect returns to READY
+        wait_frames(4);
+
+        // --------------------------------------------------------------------
+        // 3. Test Case 2: Wrong Fret Strum (-5 points)
+        // --------------------------------------------------------------------
+        // Inject a note into Lane 2 (Yellow), Slot 1
+        force dut.slots[2][1] = CELL_NOTE;
+        @(posedge CLOCK_50);
+
+        // Press wrong fret (Lane 1 / Red) and strum down
+        fret[1]    = 1'b1;
+        strum_down = 1'b0;   // press (active-low)
+
+        @(posedge dut.frame_tick);
+        @(posedge CLOCK_50);
+
+        strum_down = 1'b1;   // release
+        fret[1]    = 1'b0;
+        release dut.slots[2][1];
+
+        $display("[%0t] Test 2 (Wrong Fret Miss): Score = %0d (Expected: 5), HEX0 = %b",
+                 $time, dut.score, HEX0);
+
+        // --------------------------------------------------------------------
+        // 4. Test Case 3: Held Note Tail (+1 point per frame held)
+        // --------------------------------------------------------------------
+        // Inject a tail cell at Slot 0 (which drives hold_line[0] = 1)
+        force dut.slots[0][0] = CELL_HOLD;
+        fret[0] = 1'b1;
+
+        // Hold across 2 frames to verify continuous +1 scoring
+        wait_frames(2);
+        @(posedge CLOCK_50);
+
+        fret[0] = 1'b0;
+        release dut.slots[0][0];
+
+        $display("[%0t] Test 3 (Hold Tail x2 frames): Score = %0d (Expected: 7), HEX0 = %b",
+                 $time, dut.score, HEX0);
+
+        // Run 1 final frame and finish
+        wait_frames(1);
+        $display("[%0t] Simulation complete. Final Score = %0d", $time, dut.score);
         $finish;
     end
 

@@ -1,6 +1,17 @@
 import highway_pkg::*;
 
-module guitar_top (
+module guitar_top #(
+    // Pin polarity of the player inputs. The strum buttons are active-low
+    // (pressed = 0, like KEY[1]/KEY[2] and the guitar's strum switches); the
+    // old DE2 top inverted them with ~KEY[1] / ~KEY[2]. Set FRET_ACTIVE_LOW
+    // if the frets are wired to active-low buttons instead of switches.
+    parameter bit STRUM_ACTIVE_LOW = 1'b1,
+    parameter bit FRET_ACTIVE_LOW  = 1'b0,
+    // A strum button must hold a new level this many clocks before it counts
+    // (250_000 = 5 ms at 50 MHz). Swallows switch bounce, which otherwise
+    // shows up as extra strums -- usually on release -- and costs -5 each.
+    parameter int DEBOUNCE_CYCLES  = 250_000
+) (
     // Clock 
     input  logic        CLOCK_50,
 
@@ -44,6 +55,54 @@ module guitar_top (
     // Active-low button for rst
     logic rst;
     assign rst = ~rst_n;
+
+    // Player inputs: convert to active-high and pass through two flip-flops.
+    // The buttons are asynchronous to CLOCK_50; the synchronizer keeps the
+    // strum edge detector in hit_detect from seeing a metastable value.
+    //
+    // Without the inversion, an idle active-low strum button reads 1, so
+    // (strum_up | strum_down) is stuck at 1 and no strum edge ever reaches
+    // hit_detect -- only hold-line scoring, which needs no strum, works.
+    logic [6:0] in_sync1, in_sync2;
+    logic [4:0] fret_s;
+    logic       strum_up_s, strum_down_s;
+
+    always_ff @(posedge CLOCK_50) begin
+        in_sync1 <= { strum_down ^ STRUM_ACTIVE_LOW,
+                      strum_up   ^ STRUM_ACTIVE_LOW,
+                      fret       ^ {5{FRET_ACTIVE_LOW}} };
+        in_sync2 <= in_sync1;
+    end
+
+    assign fret_s = in_sync2[4:0];
+
+    // Strum debounce: the output follows the input only after the input has
+    // stayed at its new level for DEBOUNCE_CYCLES clocks in a row.
+    logic [1:0] strum_sync, strum_db;
+    logic [$clog2(DEBOUNCE_CYCLES+1)-1:0] db_cnt [0:1];
+    assign strum_sync = in_sync2[6:5];      // {down, up}
+
+    always_ff @(posedge CLOCK_50) begin
+        for (int i = 0; i < 2; i++) begin
+            if (rst) begin
+                strum_db[i] <= 1'b0;
+                db_cnt[i]   <= '0;
+            end
+            else if (strum_sync[i] == strum_db[i]) begin
+                db_cnt[i] <= '0;                      // no change pending
+            end
+            else if (db_cnt[i] == DEBOUNCE_CYCLES - 1) begin
+                strum_db[i] <= strum_sync[i];         // stable long enough
+                db_cnt[i]   <= '0;
+            end
+            else begin
+                db_cnt[i] <= db_cnt[i] + 1'b1;
+            end
+        end
+    end
+
+    assign strum_up_s   = strum_db[0];
+    assign strum_down_s = strum_db[1];
 
     // Audio subsystem 
     logic clk_aud, pll_locked;
@@ -94,7 +153,7 @@ module guitar_top (
     );
 
     assign VGA_SYNC_N = 1'b1;
-    assign LEDR       = {audio_status, 5'd0, fret};
+    assign LEDR       = {audio_status, 5'd0, fret_s};
     assign LEDG       = score[8:0];
 
     // Core Game Logic
@@ -116,7 +175,7 @@ module guitar_top (
         .clk50       (CLOCK_50),
         .rst         (game_rst),
         .slots       (slots),
-        .frets       (fret),
+        .frets       (fret_s),
         .hsync       (VGA_HS),
         .vsync       (VGA_VS),
         .vga_clk     (VGA_CLK),
@@ -145,14 +204,15 @@ module guitar_top (
     );
 
     hit_detect #(
-        .HIT_WINDOW(4)
+        .HIT_WINDOW (4),   // frames before the line a strum still counts
+        .LATE_WINDOW(3)    // frames after the line a strum still counts
     ) hit_unit (
         .clk50       (CLOCK_50),
         .rst         (game_rst),
         .frame_tick  (frame_tick),
-        .fret        (fret),
-        .strum_up    (strum_up),
-        .strum_down  (strum_down),
+        .fret        (fret_s),
+        .strum_up    (strum_up_s),
+        .strum_down  (strum_down_s),
         .slots       (slots),
         .hold_line   (hold_line),
         .score       (score)
