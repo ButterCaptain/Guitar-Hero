@@ -1,11 +1,9 @@
 import highway_pkg::*;
 
 module guitar_top #(
-    // Pin polarity of the player inputs. The strum buttons are active-low
-    // (pressed = 0, like KEY[1]/KEY[2] and the guitar's strum switches); the
-    // old DE2 top inverted them with ~KEY[1] / ~KEY[2]. Set FRET_ACTIVE_LOW
-    // if the frets are wired to active-low buttons instead of switches.
-    parameter bit STRUM_ACTIVE_LOW = 1'b1,
+    // Fret polarity. Set to 1 if the frets are wired to active-low buttons
+    // instead of switches. (The strum buttons need no setting: their idle
+    // level is learned at power-up / reset -- see "Player inputs" below.)
     parameter bit FRET_ACTIVE_LOW  = 1'b0,
     // A strum button must hold a new level this many clocks before it counts
     // (250_000 = 5 ms at 50 MHz). Swallows switch bounce, which otherwise
@@ -56,31 +54,43 @@ module guitar_top #(
     logic rst;
     assign rst = ~rst_n;
 
-    // Player inputs: convert to active-high and pass through two flip-flops.
-    // The buttons are asynchronous to CLOCK_50; the synchronizer keeps the
-    // strum edge detector in hit_detect from seeing a metastable value.
-    //
-    // Without the inversion, an idle active-low strum button reads 1, so
-    // (strum_up | strum_down) is stuck at 1 and no strum edge ever reaches
-    // hit_detect -- only hold-line scoring, which needs no strum, works.
+    // ---- Player inputs -----------------------------------------------------
+    // 1. Two flip-flops: the buttons are asynchronous to CLOCK_50, and the
+    //    strum edge detector must never see a metastable value.
     logic [6:0] in_sync1, in_sync2;
     logic [4:0] fret_s;
     logic       strum_up_s, strum_down_s;
 
     always_ff @(posedge CLOCK_50) begin
-        in_sync1 <= { strum_down ^ STRUM_ACTIVE_LOW,
-                      strum_up   ^ STRUM_ACTIVE_LOW,
-                      fret       ^ {5{FRET_ACTIVE_LOW}} };
+        in_sync1 <= {strum_down, strum_up, fret ^ {5{FRET_ACTIVE_LOW}}};
         in_sync2 <= in_sync1;
     end
 
     assign fret_s = in_sync2[4:0];
 
-    // Strum debounce: the output follows the input only after the input has
-    // stayed at its new level for DEBOUNCE_CYCLES clocks in a row.
-    logic [1:0] strum_sync, strum_db;
+    // 2. Strum polarity, learned. For the first 255 clocks after power-up and
+    //    after every reset we record each strum pin's level as "not pressed";
+    //    afterwards "pressed" means "different from that". So active-low and
+    //    active-high buttons both work, and a pin that never changes (wrong
+    //    pin, not wired) simply never strums -- it can no longer block the
+    //    other strum button. Don't hold the strum bar while pressing reset.
+    logic [7:0] cal_cnt = '0;           // power-up value: calibrate at configuration
+    logic [1:0] strum_idle = '0;        // {down, up} level when not pressed
+    logic [1:0] strum_sync;             // {down, up}, 1 = pressed
+
+    always_ff @(posedge CLOCK_50) begin
+        if (rst)                cal_cnt <= '0;
+        else if (cal_cnt != '1) cal_cnt <= cal_cnt + 1'b1;
+
+        if (cal_cnt != '1) strum_idle <= in_sync2[6:5];
+    end
+
+    assign strum_sync = (cal_cnt != '1) ? 2'b00 : (in_sync2[6:5] ^ strum_idle);
+
+    // 3. Debounce: each strum output follows its input only after the input
+    //    has stayed at its new level for DEBOUNCE_CYCLES clocks in a row.
+    logic [1:0] strum_db;
     logic [$clog2(DEBOUNCE_CYCLES+1)-1:0] db_cnt [0:1];
-    assign strum_sync = in_sync2[6:5];      // {down, up}
 
     always_ff @(posedge CLOCK_50) begin
         for (int i = 0; i < 2; i++) begin
@@ -153,7 +163,34 @@ module guitar_top #(
     );
 
     assign VGA_SYNC_N = 1'b1;
-    assign LEDR       = {audio_status, 5'd0, fret_s};
+    // ---- Debug LEDs for the strum path (LEDR[9:5]) --------------------------
+    // Read them left to right to find where a strum gets lost:
+    //   LEDR[5]  strum UP   pressed (after polarity learning + debounce)
+    //   LEDR[6]  strum DOWN pressed
+    //   LEDR[7]  flips every time hit_detect judges a strum
+    //   LEDR[8]  lights ~1/4 s when a strum scores a hit (+10)
+    //   LEDR[9]  on while a note is inside the hit window
+    // LEDR[4:0] are the frets, LEDR[17:10] the audio status.
+    logic dbg_strum_judged, dbg_hit, dbg_note_in_zone;
+    logic strum_toggle;
+    logic [23:0] hit_led_cnt;   // 12.5 M clocks = 0.25 s
+
+    always_ff @(posedge CLOCK_50) begin
+        if (game_rst) begin
+            strum_toggle <= 1'b0;
+            hit_led_cnt  <= '0;
+        end
+        else begin
+            if (dbg_strum_judged) strum_toggle <= ~strum_toggle;
+            if (dbg_hit)                hit_led_cnt <= 24'd12_500_000;
+            else if (hit_led_cnt != '0) hit_led_cnt <= hit_led_cnt - 1'b1;
+        end
+    end
+
+    assign LEDR = {audio_status,
+                   dbg_note_in_zone, (hit_led_cnt != '0), strum_toggle,
+                   strum_down_s, strum_up_s,
+                   fret_s};
     assign LEDG       = score[8:0];
 
     // Core Game Logic
@@ -205,7 +242,8 @@ module guitar_top #(
 
     hit_detect #(
         .HIT_WINDOW (4),   // frames before the line a strum still counts
-        .LATE_WINDOW(3)    // frames after the line a strum still counts
+        .LATE_WINDOW(3),   // frames after the line a strum still counts
+        .HOLD_FRAMES(10)   // hold this many frames for each +1 (60 frames = 1 s)
     ) hit_unit (
         .clk50       (CLOCK_50),
         .rst         (game_rst),
@@ -215,7 +253,10 @@ module guitar_top #(
         .strum_down  (strum_down_s),
         .slots       (slots),
         .hold_line   (hold_line),
-        .score       (score)
+        .score       (score),
+        .dbg_strum_judged (dbg_strum_judged),
+        .dbg_hit          (dbg_hit),
+        .dbg_note_in_zone (dbg_note_in_zone)
     );
 
 endmodule

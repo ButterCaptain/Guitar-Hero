@@ -29,11 +29,13 @@ import highway_pkg::*;
 //      +10  strum with the right frets while a note is in the window
 //       -5  strum with the wrong frets, or with nothing in the window
 //       -5  per note that leaves the late window un-hit
-//       +1 / -1  per lane with a hold tail on the line, fret held / not held
+//       +1  per HOLD_FRAMES frames a lane's hold tail is on the line, fret held
+//       -1  per HOLD_FRAMES frames it is on the line with the fret NOT held
 // ============================================================================
 module hit_detect #(
     parameter int HIT_WINDOW  = 4,   // early frames: slots 0 .. HIT_WINDOW-1
-    parameter int LATE_WINDOW = 3    // frames a note stays hittable past the line (>= 1)
+    parameter int LATE_WINDOW = 3,   // frames a note stays hittable past the line (>= 1)
+    parameter int HOLD_FRAMES = 10   // hold frames per +1 (or per -1 when not held)
 ) (
     input logic clk50,
     input logic rst,
@@ -47,21 +49,32 @@ module hit_detect #(
     input logic [N_LANES-1:0] hold_line,
 
     // Output the score
-    output logic signed [15:0] score
+    output logic signed [15:0] score,
+
+    // Debug (for LEDs): pulses on the frame_tick that judges a strum / that
+    // scores a hit, and a level that is high while a note is hittable
+    output logic dbg_strum_judged,
+    output logic dbg_hit,
+    output logic dbg_note_in_zone
 );
-    // Edge detection for the strum input -----
+    // Edge detection for the strum inputs -----
     // (guitar_top hands us synchronized, debounced, active-high strums)
-    logic raw_strum, strum_prev, strum_edge;
-    assign raw_strum = strum_up | strum_down;
+    // Each input gets its own edge detector, so pressing up OR down strums
+    // even if the other one is stuck pressed.
+    logic up_prev, down_prev, strum_edge;
 
     always_ff @(posedge clk50) begin
         if (rst) begin
-            strum_prev <= 1'b0;
+            up_prev   <= 1'b0;
+            down_prev <= 1'b0;
         end
-        else strum_prev <= raw_strum;
+        else begin
+            up_prev   <= strum_up;
+            down_prev <= strum_down;
+        end
     end
 
-    assign strum_edge = raw_strum && !strum_prev;
+    assign strum_edge = (strum_up && !up_prev) || (strum_down && !down_prev);
     //=------------------------------------
 
     // Holds a strum until the next frame_tick, in case the user strums between frames
@@ -105,17 +118,36 @@ module hit_detect #(
     // Missed: the note is in its last late frame and is not being hit now
     assign lane_missed = late_last & ~lane_hit;
 
-    // Hold-line scoring for this frame, summed over every lane at once:
-    // +1 per lane whose tail is on the hit line with its fret held, -1 per
-    // lane whose tail is there without it.
+    assign dbg_strum_judged = frame_tick && strum_now;
+    assign dbg_hit          = frame_tick && hit_now;
+    assign dbg_note_in_zone = (note_hit_zone != '0);
+
+    // ---- hold-line scoring ------------------------------------------------
+    // While a lane's tail is on the hit line, count the frames its fret is
+    // held and the frames it is not -- separately, per lane:
+    //   every HOLD_FRAMES held frames      -> +1
+    //   every HOLD_FRAMES not-held frames  -> -1
+    // Both counts restart when the tail ends, so every hold starts fresh.
+    // HOLD_FRAMES = 1 scores every frame, like the original.
+    localparam int HCW = (HOLD_FRAMES > 1) ? $clog2(HOLD_FRAMES) : 1;
+    logic [N_LANES-1:0][HCW-1:0] held_cnt;    // held frames since the last +1
+    logic [N_LANES-1:0][HCW-1:0] unheld_cnt;  // not-held frames since the last -1
+    logic [N_LANES-1:0] hold_gain, hold_loss; // this frame earns +1 / costs -1
+
+    always_comb begin
+        for (int L = 0; L < N_LANES; L++) begin
+            hold_gain[L] = hold_line[L] &&  fret[L] && (held_cnt[L]   == HCW'(HOLD_FRAMES - 1));
+            hold_loss[L] = hold_line[L] && !fret[L] && (unheld_cnt[L] == HCW'(HOLD_FRAMES - 1));
+        end
+    end
+
+    // Hold points for this frame, summed over every lane at once
     logic signed [15:0] hold_delta;
     always_comb begin
         hold_delta = 16'sd0;
         for (int L = 0; L < N_LANES; L++) begin
-            if (hold_line[L]) begin
-                if (fret[L]) hold_delta = hold_delta + 16'sd1;
-                else         hold_delta = hold_delta - 16'sd1;
-            end
+            if (hold_gain[L]) hold_delta = hold_delta + 16'sd1;
+            if (hold_loss[L]) hold_delta = hold_delta - 16'sd1;
         end
     end
 
@@ -142,6 +174,8 @@ module hit_detect #(
             strum_pending <= 1'b0;
             done          <= '0;
             late          <= '0;
+            held_cnt      <= '0;
+            unheld_cnt    <= '0;
         end
         else if (frame_tick) begin
             score         <= add_floor0(score, frame_delta);
@@ -158,6 +192,18 @@ module hit_detect #(
                 late[L][0] <= live_early[L][0] && !lane_hit[L];  // crossed the line un-hit
                 for (int k = 1; k < LATE_WINDOW; k++)
                     late[L][k] <= late[L][k-1] && !lane_hit[L];
+
+                // hold counters: restart when the tail ends or a point is paid
+                if (!hold_line[L]) begin
+                    held_cnt[L]   <= '0;
+                    unheld_cnt[L] <= '0;
+                end
+                else if (fret[L]) begin
+                    held_cnt[L] <= hold_gain[L] ? '0 : held_cnt[L] + 1'b1;
+                end
+                else begin
+                    unheld_cnt[L] <= hold_loss[L] ? '0 : unheld_cnt[L] + 1'b1;
+                end
             end
         end
         else if (strum_edge) begin
